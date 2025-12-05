@@ -5,6 +5,8 @@
 */
 
 #include "softuart.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 // Some internal define
 #if(SoftUart_PARITY)
@@ -236,7 +238,10 @@ void SoftUartRxDataBitProcess(SoftUart_S *SU,uint8_t B0_1)
 // You do not usually need to use this function!
 void SoftUartWaitUntilTxComplate(uint8_t SoftUartNumber)
 {
-	while(SUart[SoftUartNumber].TxNComplated);
+	while(SUart[SoftUartNumber].TxNComplated)
+	{
+		vTaskDelay(1);  // 1ms마다 체크, CPU 양보
+	}
 }
 
 // Copy Data to Transmit Buffer and Start Sending
