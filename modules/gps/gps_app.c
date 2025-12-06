@@ -8,6 +8,7 @@
 #include "rtcm.h"
 #include "led.h"
 #include <string.h>
+#include <stdlib.h>
 #include "ubx_init.h"
 #include "flash_params.h"
 
@@ -215,8 +216,7 @@ static const char *um982_base_cmds[] = {
   "gpgga com1 1\r\n",
   // "gpgsv com1 1\r\n",
   // "BESTNAVB 1\r\n",
-  "MODE BASE TIME 120 0.1\r\n",
-  // "mode base 37.4136149088 127.125455729 62.0923\r\n", // lat=40.07898324818,lon=116.23660197714,height=60.4265
+  // MODE BASE command will be sent asynchronously after init complete
 };
 
 static const char *um982_rover_cmds[] = {
@@ -250,30 +250,49 @@ typedef struct {
 
 #if defined(BOARD_TYPE_BASE_UNICORE) || defined(BOARD_TYPE_ROVER_UNICORE)
 
-static void fix_init_complete(bool success, void *user_data) {
+static void base_mode_init_complete(bool success, void *user_data) {
   gps_id_t id = (gps_id_t)(uintptr_t)user_data;
-  LOG_INFO("GPS[%d] Fix mode init %s", id, success ? "succeeded" : "failed");
+  LOG_INFO("GPS[%d] Base station mode init %s", id, success ? "succeeded" : "failed");
 }
 
 static void overall_init_complete(bool success, void *user_data) {
   gps_id_t id = (gps_id_t)(uintptr_t)user_data;
   LOG_INFO("GPS[%d] Overall init %s", id, success ? "succeeded" : "failed");
 
-
   if(success)
   {
     #if defined(BOARD_TYPE_BASE_UNICORE)
-    // char buffer[64];
-    // snprintf(buffer, sizeof(buffer),
-    //          "mode base %.10f %.10f %.4f\r\n",
-    //          40.07898324818, 116.23660197714, 60.4265);
-    //    gps_send_command_async(0, buffer,
-    //                        1000, fix_init_complete, 0);
+    // Get user parameters to determine base station mode
+    user_params_t* params = flash_params_get_current();
 
+    if(params->use_manual_position)
+    {
+      // Fixed base station mode with manual position
+      char buffer[128];
+      double lat = atof(params->lat);
+      double lon = atof(params->lon);
+      double alt = atof(params->alt);
+
+      snprintf(buffer, sizeof(buffer),
+               "mode base %.10f %.10f %.4f\r\n",
+               lat, lon, alt);
+
+      LOG_INFO("GPS[%d] Setting fixed base station mode: lat=%.10f, lon=%.10f, alt=%.4f",
+               id, lat, lon, alt);
+
+      gps_send_command_async(id, buffer, 1000, base_mode_init_complete,
+                             (void *)(uintptr_t)id);
+    }
+    else
+    {
+      // Survey-in mode (auto position)
+      LOG_INFO("GPS[%d] Setting survey-in base station mode", id);
+      gps_send_command_async(id, "MODE BASE TIME 120 0.1\r\n", 1000,
+                             base_mode_init_complete, (void *)(uintptr_t)id);
+    }
     #endif
   }
-  
-   }
+}
 #endif
 
 static void gps_init_command_callback(bool success, void *user_data) {
