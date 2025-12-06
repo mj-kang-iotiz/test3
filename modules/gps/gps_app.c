@@ -319,14 +319,6 @@ static bool gps_configure_um982_base_mode_async(gps_id_t id, gps_init_callback_t
 static void overall_init_complete(bool success, void *user_data) {
   gps_id_t id = (gps_id_t)(uintptr_t)user_data;
   LOG_INFO("GPS[%d] Overall init %s", id, success ? "succeeded" : "failed");
-
-  if(success)
-  {
-    #if defined(BOARD_TYPE_BASE_UNICORE)
-    // Configure base station mode based on user parameters
-    gps_configure_um982_base_mode_async(id, base_mode_init_complete, (void *)(uintptr_t)id);
-    #endif
-  }
 }
 #endif
 
