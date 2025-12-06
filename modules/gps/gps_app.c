@@ -1044,6 +1044,97 @@ bool gps_factory_reset_async(gps_id_t id, gps_init_callback_t callback, void *us
   return true;
 }
 
+// ============================================================
+// GPS Heading Length 설정 (비동기)
+// ============================================================
+
+typedef struct {
+  gps_id_t gps_id;
+  uint8_t current_step;  // 0: config heading length, 1: CONFIG HEADING FIXLENGTH
+  gps_command_callback_t user_callback;
+  void *user_data;
+  char cmd_buffer[128];
+} gps_config_heading_context_t;
+
+static void gps_config_heading_callback(bool success, void *user_data)
+{
+  gps_config_heading_context_t *ctx = (gps_config_heading_context_t *)user_data;
+
+  if (!success) {
+    LOG_ERR("GPS[%d] Heading config step %d failed", ctx->gps_id, ctx->current_step);
+
+    // 실패 시 사용자 콜백 호출 후 컨텍스트 해제
+    if (ctx->user_callback) {
+      ctx->user_callback(false, ctx->user_data);
+    }
+    vPortFree(ctx);
+    return;
+  }
+
+  LOG_INFO("GPS[%d] Heading config step %d OK", ctx->gps_id, ctx->current_step);
+
+  ctx->current_step++;
+
+  if (ctx->current_step == 1) {
+    // 두 번째 명령어: CONFIG HEADING FIXLENGTH
+    gps_send_command_async(ctx->gps_id, "CONFIG HEADING FIXLENGTH\r\n",
+                          3000, gps_config_heading_callback, ctx);
+  } else {
+    // 모든 명령어 완료
+    LOG_INFO("GPS[%d] Heading config complete!", ctx->gps_id);
+
+    if (ctx->user_callback) {
+      ctx->user_callback(true, ctx->user_data);
+    }
+    vPortFree(ctx);
+  }
+}
+
+bool gps_config_heading_length_async(gps_id_t id, double baseline_len, double slave_distance,
+                                     gps_command_callback_t callback, void *user_data)
+{
+  if (id >= GPS_ID_MAX || !gps_instances[id].enabled) {
+    LOG_ERR("GPS[%d] invalid", id);
+    return false;
+  }
+
+  gps_instance_t *inst = &gps_instances[id];
+
+  // UM982만 지원
+  if (inst->type != GPS_TYPE_UM982) {
+    LOG_ERR("GPS[%d] Only UM982 supports heading config", id);
+    return false;
+  }
+
+  // 컨텍스트 동적 할당
+  gps_config_heading_context_t *ctx = pvPortMalloc(sizeof(gps_config_heading_context_t));
+  if (!ctx) {
+    LOG_ERR("GPS[%d] Failed to allocate heading config context", id);
+    return false;
+  }
+
+  // 컨텍스트 초기화
+  ctx->gps_id = id;
+  ctx->current_step = 0;
+  ctx->user_callback = callback;
+  ctx->user_data = user_data;
+
+  // 첫 번째 명령어: config heading length [baseline] [slave_distance]
+  snprintf(ctx->cmd_buffer, sizeof(ctx->cmd_buffer),
+           "config heading length %.0f %.0f\r\n", baseline_len, slave_distance);
+
+  LOG_INFO("GPS[%d] Starting heading config: %s", id, ctx->cmd_buffer);
+
+  // 첫 번째 명령어 전송
+  if (!gps_send_command_async(id, ctx->cmd_buffer, 3000, gps_config_heading_callback, ctx)) {
+    LOG_ERR("GPS[%d] Failed to send heading length command", id);
+    vPortFree(ctx);
+    return false;
+  }
+
+  return true;
+}
+
 /**
  * @brief GPS 위치 데이터 포맷팅
  *

@@ -84,6 +84,24 @@ bool gps_get_gga_avg(gps_id_t id, double *lat, double *lon, double *alt);
 bool gps_factory_reset_async(gps_id_t id, gps_init_callback_t callback, void *user_data);
 
 /**
+ * @brief GPS heading length 설정 (비동기)
+ *
+ * user_params에서 읽은 baseline_len 값으로 heading length를 설정합니다.
+ * 다음 명령어를 순차적으로 전송:
+ *   1. config heading length [baseline_len] [slave_distance]
+ *   2. CONFIG HEADING FIXLENGTH
+ *
+ * @param id GPS ID
+ * @param baseline_len Baseline 길이 (cm)
+ * @param slave_distance Master-slave 거리 (cm)
+ * @param callback 완료 콜백 (NULL 가능)
+ * @param user_data 콜백에 전달할 사용자 데이터
+ * @return true: 명령 전송 시작 성공, false: 실패
+ */
+bool gps_config_heading_length_async(gps_id_t id, double baseline_len, double slave_distance,
+                                     gps_command_callback_t callback, void *user_data);
+
+/**
  * @brief GPS 위치 데이터 포맷팅
  *
  * 포맷: +GPS,lat,N/S,lon,E/W,msl_alt,ellipsoid_alt,heading,fix\r\n
