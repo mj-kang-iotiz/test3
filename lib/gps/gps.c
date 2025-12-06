@@ -24,13 +24,22 @@ void _gps_gga_raw_add(gps_t *gps, char ch) {
 bool get_gga(gps_t *gps, char *buf, uint8_t *len) {
   bool ret = false;
 
-  // xSemaphoreTake(gps->mutex, portMAX_DELAY);
+  // 뮤텍스 대신 Critical Section 사용 (데드락 완전 방지)
+  // 장점:
+  // 1. 인터럽트만 짧게 비활성화 → 다른 Task 블로킹 없음
+  // 2. 뮤텍스 대기 없음 → 타임아웃 불필요
+  // 3. 매우 빠름 (수 마이크로초)
+  // 단점: Critical Section 내부는 최소화해야 함 (인터럽트 지연)
+
+  // 먼저 플래그 체크 (Critical Section 밖에서)
   if (gps->nmea_data.gga_is_rdy && gps->nmea_data.gga.fix != GPS_FIX_INVALID) {
+    // Critical Section: 데이터 복사만 수행
+    taskENTER_CRITICAL();
     strncpy(buf, gps->nmea_data.gga_raw, gps->nmea_data.gga_raw_pos + 1);
     *len = gps->nmea_data.gga_raw_pos;
+    taskEXIT_CRITICAL();
     ret = true;
   }
-  // xSemaphoreGive(gps->mutex);
 
   return ret;
 }

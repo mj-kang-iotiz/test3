@@ -8,6 +8,7 @@
 #include "rtcm.h"
 #include "led.h"
 #include <string.h>
+#include <math.h>
 #include "ubx_init.h"
 #include "flash_params.h"
 
@@ -723,36 +724,42 @@ static void gps_process_task(void *pvParameter) {
       led_set_toggle(2);
     }
 
-    xSemaphoreTake(inst->gps.mutex, portMAX_DELAY);
-    pos = gps_port_get_rx_pos(id);
-    char *gps_recv = gps_port_get_recv_buf(id);
+    // 뮤텍스 획득 (타임아웃 사용으로 데드락 방지)
+    // 주의: gps_parse_process 내부에서 이벤트 핸들러가 호출될 수 있으므로
+    //       핸들러에서 블로킹 I/O를 하면 뮤텍스를 오래 잡게 되어 TX Task가 대기할 수 있음
+    if (xSemaphoreTake(inst->gps.mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+      pos = gps_port_get_rx_pos(id);
+      char *gps_recv = gps_port_get_recv_buf(id);
 
-    if (pos != old_pos) {
-      if (pos > old_pos) {
-        size_t len = pos - old_pos;
-        total_received = len;
-        LOG_DEBUG("[%d] %d received", id, (int)len);
-        LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len);
-        gps_parse_process(&inst->gps, &gps_recv[old_pos], pos - old_pos);
-      } else {
-        size_t len1 = GPS_UART_MAX_RECV_SIZE - old_pos;
-        size_t len2 = pos;
-        total_received = len1 + len2;
-        LOG_DEBUG("[%d] %d received (wrap around)", id, (int)(len1 + len2));
-        LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len1);
-        gps_parse_process(&inst->gps, &gps_recv[old_pos],
-                          GPS_UART_MAX_RECV_SIZE - old_pos);
-        if (pos > 0) {
-          LOG_DEBUG_RAW("RAW: ", gps_recv, len2);
-          gps_parse_process(&inst->gps, gps_recv, pos);
+      if (pos != old_pos) {
+        if (pos > old_pos) {
+          size_t len = pos - old_pos;
+          total_received = len;
+          LOG_DEBUG("[%d] %d received", id, (int)len);
+          LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len);
+          gps_parse_process(&inst->gps, &gps_recv[old_pos], pos - old_pos);
+        } else {
+          size_t len1 = GPS_UART_MAX_RECV_SIZE - old_pos;
+          size_t len2 = pos;
+          total_received = len1 + len2;
+          LOG_DEBUG("[%d] %d received (wrap around)", id, (int)(len1 + len2));
+          LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len1);
+          gps_parse_process(&inst->gps, &gps_recv[old_pos],
+                            GPS_UART_MAX_RECV_SIZE - old_pos);
+          if (pos > 0) {
+            LOG_DEBUG_RAW("RAW: ", gps_recv, len2);
+            gps_parse_process(&inst->gps, gps_recv, pos);
+          }
+        }
+        old_pos = pos;
+        if (old_pos == GPS_UART_MAX_RECV_SIZE) {
+          old_pos = 0;
         }
       }
-      old_pos = pos;
-      if (old_pos == GPS_UART_MAX_RECV_SIZE) {
-        old_pos = 0;
-      }
+      xSemaphoreGive(inst->gps.mutex);
+    } else {
+      LOG_WARN("GPS[%d] RX Task 뮤텍스 타임아웃", id);
     }
-    xSemaphoreGive(inst->gps.mutex);
   }
 
   vTaskDelete(NULL);
@@ -1032,7 +1039,160 @@ bool gps_factory_reset_async(gps_id_t id, gps_init_callback_t callback, void *us
 
   }
 
- 
+
+
+  return true;
+}
+
+/**
+ * @brief GPS 위치 데이터 포맷팅
+ *
+ * 포맷: +GPS,lat,N/S,lon,E/W,msl_alt,ellipsoid_alt,heading,fix\r\n
+ *
+ * GPS 타입별 데이터 소스:
+ * - Unicore UM982: BESTNAV (lat, lon, height, geoid, trk_gnd)
+ * - Ublox F9P: HPPOSLLH (lat, lon, height, msl) + RELPOSNED (heading)
+ */
+bool gps_format_position_data(gps_id_t id, char *buffer, size_t buf_size)
+{
+  if (id >= GPS_ID_MAX || !gps_instances[id].enabled || !buffer || buf_size < 100) {
+    return false;
+  }
+
+  gps_instance_t *inst = &gps_instances[id];
+  double lat, lon, msl_alt, ellipsoid_alt, heading;
+  char ns, ew;
+  int fix;
+  bool has_data = false;
+
+  // GPS 타입에 따라 다른 데이터 소스 사용
+  if (inst->type == GPS_TYPE_UM982) {
+    // ============================================================
+    // Unicore UM982: BESTNAV 바이너리 데이터 사용
+    // ============================================================
+    hpd_unicore_bestnavb_t bestnav;
+
+    if (xSemaphoreTake(inst->gps.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      bestnav = inst->gps.unicore_bin_data.bestnav;
+      xSemaphoreGive(inst->gps.mutex);
+
+      // 유효성 검사 (위치 타입이 0이 아닌지 확인)
+      if (bestnav.pos_type != 0) {
+        lat = bestnav.lat;
+        lon = bestnav.lon;
+        ellipsoid_alt = bestnav.height;                 // 타원체 고도 [m]
+        msl_alt = bestnav.height - bestnav.geoid;       // 해수면 고도 = 타원체 - 지오이드
+        heading = bestnav.trk_gnd;                      // 헤딩각 [도]
+
+        // 남/북위, 동/서경 결정
+        ns = (lat >= 0) ? 'N' : 'S';
+        ew = (lon >= 0) ? 'E' : 'W';
+        lat = fabs(lat);
+        lon = fabs(lon);
+
+        // FIX 상태 매핑 (pos_type → GPS FIX)
+        // 0: None, 1: Single, 4: RTK Fix, 5: RTK Float 등
+        if (bestnav.pos_type == 4 || bestnav.pos_type == 5) {
+          fix = bestnav.pos_type;  // RTK Fix/Float
+        } else if (bestnav.pos_type >= 1) {
+          fix = 1;  // GPS
+        } else {
+          fix = 0;  // Invalid
+        }
+
+        has_data = true;
+      }
+    }
+  }
+  else if (inst->type == GPS_TYPE_F9P) {
+    // ============================================================
+    // Ublox F9P: HPPOSLLH + RELPOSNED 사용
+    // ============================================================
+    gps_ubx_nav_hpposllh_t hpposllh;
+    gps_ubx_nav_relposned_t relposned;
+    gps_nmea_data_t nmea_data;  // FIX 상태용
+
+    if (xSemaphoreTake(inst->gps.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      hpposllh = inst->gps.ubx_data.hpposllh;
+      relposned = inst->gps.ubx_data.relposned;
+      nmea_data = inst->gps.nmea_data;
+      xSemaphoreGive(inst->gps.mutex);
+
+      // 유효성 검사 (flag가 0이면 valid)
+      if (hpposllh.flag == 0) {
+        // 고정밀 위도/경도 계산 (1e-7도 + 1e-9도)
+        lat = (hpposllh.lat * 1e-7) + (hpposllh.lat_hp * 1e-9);
+        lon = (hpposllh.lon * 1e-7) + (hpposllh.lon_hp * 1e-9);
+
+        // 고정밀 고도 계산 [mm] → [m]
+        ellipsoid_alt = (hpposllh.height + hpposllh.height_hp * 0.1) / 1000.0;
+        msl_alt = (hpposllh.msl + hpposllh.msl_hp * 0.1) / 1000.0;
+
+        // 헤딩각 계산 (RELPOSNED에서, 1e-5도 단위)
+        if (relposned.flags.rel_pos_heading_valid) {
+          heading = relposned.rel_pos_heading * 1e-5;
+        } else {
+          heading = 0.0;  // 헤딩 무효
+        }
+
+        // 남/북위, 동/서경 결정
+        ns = (lat >= 0) ? 'N' : 'S';
+        ew = (lon >= 0) ? 'E' : 'W';
+        lat = fabs(lat);
+        lon = fabs(lon);
+
+        // FIX 상태 (NMEA GGA에서 가져옴)
+        fix = (int)nmea_data.gga.fix;
+
+        has_data = true;
+      }
+    }
+  }
+  else {
+    // ============================================================
+    // 기타 GPS: NMEA GGA + THS 사용 (Fallback)
+    // ============================================================
+    gps_nmea_data_t nmea_data;
+
+    if (xSemaphoreTake(inst->gps.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+      if (inst->gps.nmea_data.gga_is_rdy &&
+          inst->gps.nmea_data.gga.fix != GPS_FIX_INVALID) {
+        nmea_data = inst->gps.nmea_data;
+        xSemaphoreGive(inst->gps.mutex);
+
+        lat = nmea_data.gga.lat;
+        lon = nmea_data.gga.lon;
+        ns = nmea_data.gga.ns;
+        ew = nmea_data.gga.ew;
+        msl_alt = nmea_data.gga.alt;
+        ellipsoid_alt = nmea_data.gga.alt + nmea_data.gga.geo_sep;
+        heading = nmea_data.ths.heading;
+        fix = (int)nmea_data.gga.fix;
+
+        has_data = true;
+      } else {
+        xSemaphoreGive(inst->gps.mutex);
+      }
+    }
+  }
+
+  if (!has_data) {
+    return false;
+  }
+
+  // 포맷팅 (뮤텍스 밖에서 수행)
+  int written = snprintf(buffer, buf_size,
+                         "+GPS,%.6f,%c,%.6f,%c,%.1f,%.1f,%.2f,%d\r\n",
+                         lat, ns, lon, ew,
+                         msl_alt,
+                         ellipsoid_alt,
+                         heading,
+                         fix);
+
+  // 버퍼 오버플로우 체크
+  if (written < 0 || written >= (int)buf_size) {
+    return false;
+  }
 
   return true;
 }

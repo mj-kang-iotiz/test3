@@ -5,6 +5,8 @@
 */
 
 #include "softuart.h"
+#include "FreeRTOS.h"
+#include "task.h"
 
 // Some internal define
 #if(SoftUart_PARITY)
@@ -105,6 +107,9 @@ SoftUartState_E SoftUartReadRxBuffer(uint8_t SoftUartNumber,uint8_t *Buffer,uint
 {
 	int i;
 	if(SoftUartNumber>=Number_Of_SoftUarts)return SoftUart_Error;
+
+	// Critical Section: RX 버퍼 읽기 보호 (ISR과 동기화)
+	taskENTER_CRITICAL();
 	for(i=0;i<Len;i++)
 	{
 		Buffer[i]=SUart[SoftUartNumber].Buffer->Rx[i];
@@ -114,6 +119,8 @@ SoftUartState_E SoftUartReadRxBuffer(uint8_t SoftUartNumber,uint8_t *Buffer,uint
 		SUart[SoftUartNumber].Buffer->Rx[i]=SUart[SoftUartNumber].Buffer->Rx[i+Len];
 	}
 	SUart[SoftUartNumber].RxIndex-=Len;
+	taskEXIT_CRITICAL();
+
 	return SoftUart_OK;
 }
 
@@ -247,6 +254,8 @@ SoftUartState_E SoftUartPuts(uint8_t SoftUartNumber,uint8_t *Data,uint8_t Len)
 	if(SoftUartNumber>=Number_Of_SoftUarts)return SoftUart_Error;
 	if(SUart[SoftUartNumber].TxNComplated) return SoftUart_Error;
 
+	// Critical Section: TX 버퍼 쓰기 보호 (ISR과 동기화)
+	taskENTER_CRITICAL();
 	SUart[SoftUartNumber].TxIndex=0;
 	SUart[SoftUartNumber].TxSize=Len;
 
@@ -257,6 +266,7 @@ SoftUartState_E SoftUartPuts(uint8_t SoftUartNumber,uint8_t *Data,uint8_t Len)
 
 	SUart[SoftUartNumber].TxNComplated=1;
 	SUart[SoftUartNumber].TxEnable=1;
+	taskEXIT_CRITICAL();
 
 	return SoftUart_OK;
 }

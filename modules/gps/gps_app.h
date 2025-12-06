@@ -83,4 +83,17 @@ bool gps_gga_avg_can_read(gps_id_t id);
 bool gps_get_gga_avg(gps_id_t id, double *lat, double *lon, double *alt);
 bool gps_factory_reset_async(gps_id_t id, gps_init_callback_t callback, void *user_data);
 
+/**
+ * @brief GPS 위치 데이터 포맷팅
+ *
+ * 포맷: +GPS,lat,N/S,lon,E/W,msl_alt,ellipsoid_alt,heading,fix\r\n
+ * 예시: +GPS,37.123456,N,127.123456,E,100.0,148.0,45.50,4\r\n
+ *
+ * @param id GPS ID
+ * @param buffer 출력 버퍼
+ * @param buf_size 버퍼 크기
+ * @return true: 성공, false: 실패 (데이터 없음 또는 버퍼 부족)
+ */
+bool gps_format_position_data(gps_id_t id, char *buffer, size_t buf_size);
+
 #endif

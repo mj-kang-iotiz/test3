@@ -2,6 +2,8 @@
 #include "rs485_app.h"
 #include "FreeRTOS.h"
 #include "task.h"
+#include "timers.h"
+#include "gps_app.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -172,4 +174,89 @@ static void rs485_task(void *pvParameter)
 void rs485_app_init(void)
 {
     xTaskCreate(rs485_task, "RS485_Task", 512, NULL, tskIDLE_PRIORITY + 1, NULL);
+}
+
+// ============================================================
+// GPS 데이터 주기 전송 기능
+// ============================================================
+
+static TimerHandle_t gps_tx_timer = NULL;
+static gps_id_t current_gps_id = GPS_ID_0;
+
+/**
+ * @brief GPS 데이터 전송 타이머 콜백
+ */
+static void gps_tx_timer_callback(TimerHandle_t xTimer)
+{
+  char gps_buffer[128];
+
+  // GPS 데이터 포맷팅 (뮤텍스는 함수 내부에서 처리)
+  if (gps_format_position_data(current_gps_id, gps_buffer, sizeof(gps_buffer))) {
+    // 송신 모드로 전환
+    RS485_SetTransmitMode();
+    vTaskDelay(pdMS_TO_TICKS(2));  // RS485 안정화 대기
+
+    // SoftUART로 전송 (Critical Section으로 보호됨)
+    if (SoftUartPuts(0, (uint8_t *)gps_buffer, strlen(gps_buffer)) == SoftUart_OK) {
+      SoftUartWaitUntilTxComplate(0);
+    }
+
+    vTaskDelay(pdMS_TO_TICKS(2));
+    // 수신 모드로 복귀
+    RS485_SetReceiveMode();
+  }
+}
+
+/**
+ * @brief GPS 데이터 주기 전송 시작
+ */
+bool rs485_start_gps_transmission(gps_id_t gps_id, uint32_t interval_ms)
+{
+  // 기본 전송 주기 설정
+  if (interval_ms == 0) {
+    interval_ms = GPS_TX_INTERVAL_MS;
+  }
+
+  // GPS ID 저장
+  current_gps_id = gps_id;
+
+  // 기존 타이머가 있으면 삭제
+  if (gps_tx_timer != NULL) {
+    xTimerStop(gps_tx_timer, 0);
+    xTimerDelete(gps_tx_timer, 0);
+  }
+
+  // 타이머 생성 (주기적 실행)
+  gps_tx_timer = xTimerCreate(
+      "GPS_TX_Timer",                   // 타이머 이름
+      pdMS_TO_TICKS(interval_ms),       // 주기
+      pdTRUE,                           // 자동 재시작 (주기적 실행)
+      NULL,                             // 타이머 ID (사용 안 함)
+      gps_tx_timer_callback             // 콜백 함수
+  );
+
+  if (gps_tx_timer == NULL) {
+    return false;
+  }
+
+  // 타이머 시작
+  if (xTimerStart(gps_tx_timer, 0) != pdPASS) {
+    xTimerDelete(gps_tx_timer, 0);
+    gps_tx_timer = NULL;
+    return false;
+  }
+
+  return true;
+}
+
+/**
+ * @brief GPS 데이터 주기 전송 정지
+ */
+void rs485_stop_gps_transmission(void)
+{
+  if (gps_tx_timer != NULL) {
+    xTimerStop(gps_tx_timer, 0);
+    xTimerDelete(gps_tx_timer, 0);
+    gps_tx_timer = NULL;
+  }
 }
