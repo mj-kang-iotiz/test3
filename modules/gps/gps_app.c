@@ -231,8 +231,8 @@ static const char *um982_rover_cmds[] = {
   "gpths com1 1\r\n",
   // "OBSVHA COM1 1\r\n", // slave antenna
   // "BESTNAVB 1\r\n",
-  "CONFIG HEADING FIXLENGTH\r\n"
   "config heading length 100 40\r\n",
+  "CONFIG HEADING FIXLENGTH\r\n",
   "UNIHEADINGA 1\r\n",
 };
 
