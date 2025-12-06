@@ -255,6 +255,67 @@ static void base_mode_init_complete(bool success, void *user_data) {
   LOG_INFO("GPS[%d] Base station mode init %s", id, success ? "succeeded" : "failed");
 }
 
+/**
+ * @brief UM982 Base 스테이션을 Fixed 모드로 설정 (비동기)
+ */
+static bool gps_init_um982_base_fixed_async_internal(gps_id_t id, double lat, double lon, double alt,
+                                                      gps_init_callback_t callback, void *user_data) {
+  if (id >= GPS_ID_MAX || !gps_instances[id].enabled) {
+    LOG_ERR("GPS[%d] invalid or disabled", id);
+    return false;
+  }
+
+  char buffer[128];
+  snprintf(buffer, sizeof(buffer),
+           "mode base %.10f %.10f %.4f\r\n",
+           lat, lon, alt);
+
+  LOG_INFO("GPS[%d] Setting fixed base station mode: lat=%.10f, lon=%.10f, alt=%.4f",
+           id, lat, lon, alt);
+
+  return gps_send_command_async(id, buffer, 1000, callback, user_data);
+}
+
+/**
+ * @brief UM982 Base 스테이션을 Survey-in 모드로 설정 (비동기)
+ */
+static bool gps_init_um982_base_surveyin_async_internal(gps_id_t id, uint32_t time_sec, float accuracy_m,
+                                                         gps_init_callback_t callback, void *user_data) {
+  if (id >= GPS_ID_MAX || !gps_instances[id].enabled) {
+    LOG_ERR("GPS[%d] invalid or disabled", id);
+    return false;
+  }
+
+  char buffer[128];
+  snprintf(buffer, sizeof(buffer),
+           "MODE BASE TIME %u %.1f\r\n",
+           time_sec, accuracy_m);
+
+  LOG_INFO("GPS[%d] Setting survey-in base station mode: time=%us, accuracy=%.1fm",
+           id, time_sec, accuracy_m);
+
+  return gps_send_command_async(id, buffer, 1000, callback, user_data);
+}
+
+/**
+ * @brief UM982 Base 스테이션 모드를 user_params 기반으로 설정 (비동기)
+ */
+static bool gps_configure_um982_base_mode_async(gps_id_t id, gps_init_callback_t callback, void *user_data) {
+  user_params_t* params = flash_params_get_current();
+
+  if (params->use_manual_position) {
+    // Fixed base station mode with manual position
+    double lat = atof(params->lat);
+    double lon = atof(params->lon);
+    double alt = atof(params->alt);
+
+    return gps_init_um982_base_fixed_async_internal(id, lat, lon, alt, callback, user_data);
+  } else {
+    // Survey-in mode (auto position)
+    return gps_init_um982_base_surveyin_async_internal(id, 120, 0.1f, callback, user_data);
+  }
+}
+
 static void overall_init_complete(bool success, void *user_data) {
   gps_id_t id = (gps_id_t)(uintptr_t)user_data;
   LOG_INFO("GPS[%d] Overall init %s", id, success ? "succeeded" : "failed");
@@ -262,34 +323,8 @@ static void overall_init_complete(bool success, void *user_data) {
   if(success)
   {
     #if defined(BOARD_TYPE_BASE_UNICORE)
-    // Get user parameters to determine base station mode
-    user_params_t* params = flash_params_get_current();
-
-    if(params->use_manual_position)
-    {
-      // Fixed base station mode with manual position
-      char buffer[128];
-      double lat = atof(params->lat);
-      double lon = atof(params->lon);
-      double alt = atof(params->alt);
-
-      snprintf(buffer, sizeof(buffer),
-               "mode base %.10f %.10f %.4f\r\n",
-               lat, lon, alt);
-
-      LOG_INFO("GPS[%d] Setting fixed base station mode: lat=%.10f, lon=%.10f, alt=%.4f",
-               id, lat, lon, alt);
-
-      gps_send_command_async(id, buffer, 1000, base_mode_init_complete,
-                             (void *)(uintptr_t)id);
-    }
-    else
-    {
-      // Survey-in mode (auto position)
-      LOG_INFO("GPS[%d] Setting survey-in base station mode", id);
-      gps_send_command_async(id, "MODE BASE TIME 120 0.1\r\n", 1000,
-                             base_mode_init_complete, (void *)(uintptr_t)id);
-    }
+    // Configure base station mode based on user parameters
+    gps_configure_um982_base_mode_async(id, base_mode_init_complete, (void *)(uintptr_t)id);
     #endif
   }
 }
