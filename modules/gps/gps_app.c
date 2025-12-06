@@ -723,36 +723,42 @@ static void gps_process_task(void *pvParameter) {
       led_set_toggle(2);
     }
 
-    xSemaphoreTake(inst->gps.mutex, portMAX_DELAY);
-    pos = gps_port_get_rx_pos(id);
-    char *gps_recv = gps_port_get_recv_buf(id);
+    // 뮤텍스 획득 (타임아웃 사용으로 데드락 방지)
+    // 주의: gps_parse_process 내부에서 이벤트 핸들러가 호출될 수 있으므로
+    //       핸들러에서 블로킹 I/O를 하면 뮤텍스를 오래 잡게 되어 TX Task가 대기할 수 있음
+    if (xSemaphoreTake(inst->gps.mutex, pdMS_TO_TICKS(200)) == pdTRUE) {
+      pos = gps_port_get_rx_pos(id);
+      char *gps_recv = gps_port_get_recv_buf(id);
 
-    if (pos != old_pos) {
-      if (pos > old_pos) {
-        size_t len = pos - old_pos;
-        total_received = len;
-        LOG_DEBUG("[%d] %d received", id, (int)len);
-        LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len);
-        gps_parse_process(&inst->gps, &gps_recv[old_pos], pos - old_pos);
-      } else {
-        size_t len1 = GPS_UART_MAX_RECV_SIZE - old_pos;
-        size_t len2 = pos;
-        total_received = len1 + len2;
-        LOG_DEBUG("[%d] %d received (wrap around)", id, (int)(len1 + len2));
-        LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len1);
-        gps_parse_process(&inst->gps, &gps_recv[old_pos],
-                          GPS_UART_MAX_RECV_SIZE - old_pos);
-        if (pos > 0) {
-          LOG_DEBUG_RAW("RAW: ", gps_recv, len2);
-          gps_parse_process(&inst->gps, gps_recv, pos);
+      if (pos != old_pos) {
+        if (pos > old_pos) {
+          size_t len = pos - old_pos;
+          total_received = len;
+          LOG_DEBUG("[%d] %d received", id, (int)len);
+          LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len);
+          gps_parse_process(&inst->gps, &gps_recv[old_pos], pos - old_pos);
+        } else {
+          size_t len1 = GPS_UART_MAX_RECV_SIZE - old_pos;
+          size_t len2 = pos;
+          total_received = len1 + len2;
+          LOG_DEBUG("[%d] %d received (wrap around)", id, (int)(len1 + len2));
+          LOG_DEBUG_RAW("RAW: ", &gps_recv[old_pos], len1);
+          gps_parse_process(&inst->gps, &gps_recv[old_pos],
+                            GPS_UART_MAX_RECV_SIZE - old_pos);
+          if (pos > 0) {
+            LOG_DEBUG_RAW("RAW: ", gps_recv, len2);
+            gps_parse_process(&inst->gps, gps_recv, pos);
+          }
+        }
+        old_pos = pos;
+        if (old_pos == GPS_UART_MAX_RECV_SIZE) {
+          old_pos = 0;
         }
       }
-      old_pos = pos;
-      if (old_pos == GPS_UART_MAX_RECV_SIZE) {
-        old_pos = 0;
-      }
+      xSemaphoreGive(inst->gps.mutex);
+    } else {
+      LOG_WARN("GPS[%d] RX Task 뮤텍스 타임아웃", id);
     }
-    xSemaphoreGive(inst->gps.mutex);
   }
 
   vTaskDelete(NULL);
@@ -1032,7 +1038,61 @@ bool gps_factory_reset_async(gps_id_t id, gps_init_callback_t callback, void *us
 
   }
 
- 
+
+
+  return true;
+}
+
+/**
+ * @brief GPS 위치 데이터 포맷팅
+ *
+ * 포맷: +GPS,lat,N/S,lon,E/W,msl_alt,ellipsoid_alt,heading,fix\r\n
+ */
+bool gps_format_position_data(gps_id_t id, char *buffer, size_t buf_size)
+{
+  if (id >= GPS_ID_MAX || !gps_instances[id].enabled || !buffer || buf_size < 100) {
+    return false;
+  }
+
+  gps_instance_t *inst = &gps_instances[id];
+  gps_nmea_data_t nmea_data;
+  bool has_data = false;
+
+  // GPS 데이터 읽기 (뮤텍스로 보호)
+  if (xSemaphoreTake(inst->gps.mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    // GGA 데이터가 준비되어 있고 FIX 상태가 유효한지 확인
+    if (inst->gps.nmea_data.gga_is_rdy &&
+        inst->gps.nmea_data.gga.fix != GPS_FIX_INVALID) {
+      // 데이터 복사 (뮤텍스 내에서 빠르게 복사)
+      nmea_data = inst->gps.nmea_data;
+      has_data = true;
+    }
+    xSemaphoreGive(inst->gps.mutex);
+  }
+
+  if (!has_data) {
+    return false;
+  }
+
+  // 타원체 고도 = 해수면 고도 + 지오이드 분리
+  double ellipsoid_alt = nmea_data.gga.alt + nmea_data.gga.geo_sep;
+
+  // 포맷팅 (뮤텍스 밖에서 수행)
+  int written = snprintf(buffer, buf_size,
+                         "+GPS,%.6f,%c,%.6f,%c,%.1f,%.1f,%.2f,%d\r\n",
+                         nmea_data.gga.lat,
+                         nmea_data.gga.ns,
+                         nmea_data.gga.lon,
+                         nmea_data.gga.ew,
+                         nmea_data.gga.alt,
+                         ellipsoid_alt,
+                         nmea_data.ths.heading,
+                         (int)nmea_data.gga.fix);
+
+  // 버퍼 오버플로우 체크
+  if (written < 0 || written >= (int)buf_size) {
+    return false;
+  }
 
   return true;
 }
