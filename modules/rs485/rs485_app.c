@@ -16,7 +16,7 @@ char* ATnF_Response = "+CONFIGINIT\r\n";
 char* GPSMANUF_Response = "+Unicore\r\n"; 					//"+Ublox\r\n"
 char* CONFIG_Response = "+CONFIG=Hello1234567890abcdefghijklmnopqrstuvwyzABCDEFGHIJKLMNOPQRSTUVWXYZ\r\n"; 						//need make CONFIG Variable
 char* SETBASELINE_Response = "+SETBASELINE=\r\n"; 	//need make setbaseline variable
-char* CASTER_Response = "+CASTER=\r\n"; 						//need make caster variable 
+char* CASTER_Response = "+CASTER=\r\n"; 						//need make caster variable
 char* ID_Response = "+ID=\r\n";											//need make ID variable
 char* MOUNTPOINT_Response = "+MOUNTPOINT=\r\n";			//need make MOUNTPOINT variable
 char* PASSWORD_Response = "+PASSWORD=\r\n";					//need make PASSWORD variable
@@ -27,6 +27,10 @@ char* ERROR_Response = "+ERROR\r\n";   	//ETC
 char* ERROR1_Response = "+E01\r\n";			//DO NOT KNOW ERROR
 char* ERROR2_Response = "+E02\r\n";			//Parameter ERROR
 char* ERROR3_Response = "+E03\r\n";			//NO ready device ERROR
+
+// GPS 전송 Task 핸들
+static TaskHandle_t gps_tx_task_handle = NULL;
+static gps_id_t current_gps_id = GPS_ID_0;
 
 void RS485_SetTransmitMode(void)
 {
@@ -68,14 +72,42 @@ int get_line(uint8_t SoftUartNumber, char *buffer, int maxlen)
     return index;
 }
 
+// ============================================================
+// GPS 데이터 주기 전송 Task
+// ============================================================
+static void gps_tx_task(void *pvParameter)
+{
+	char gps_buffer[128];
+	TickType_t xLastWakeTime;
+
+	// 초기 wake time 설정
+	xLastWakeTime = xTaskGetTickCount();
+
+	while(1)
+	{
+		// GPS 데이터 포맷팅 및 전송
+		if (gps_format_position_data(current_gps_id, gps_buffer, sizeof(gps_buffer))) {
+			RS485_SetTransmitMode();
+			vTaskDelay(pdMS_TO_TICKS(2));
+
+			SoftUartPuts(0, (uint8_t *)gps_buffer, strlen(gps_buffer));
+			SoftUartWaitUntilTxComplate(0);
+
+			vTaskDelay(pdMS_TO_TICKS(2));
+			RS485_SetReceiveMode();
+		}
+
+		// 정확한 2초 주기 유지
+		vTaskDelayUntil(&xLastWakeTime, pdMS_TO_TICKS(2000));
+	}
+}
+
 
 static void rs485_task(void *pvParameter)
 {
 	char ch;
 	char rx_buffer[64];
-	char gps_buffer[128];
 	uint8_t init_f = 0;
-	uint32_t last_gps_tx_tick = 0;
 
   while(1)
   {
@@ -90,30 +122,6 @@ static void rs485_task(void *pvParameter)
 			vTaskDelay(pdMS_TO_TICKS(10));
 		}
 
-		// ============================================================
-		// GPS 주기 전송 처리
-		// ============================================================
-		if (gps_tx_enabled) {
-			uint32_t now = xTaskGetTickCount();
-			if ((now - last_gps_tx_tick) >= pdMS_TO_TICKS(GPS_TX_INTERVAL_MS_ACTUAL)) {
-				last_gps_tx_tick = now;
-
-				// GPS 데이터 포맷팅 및 전송
-				if (gps_format_position_data(current_gps_id, gps_buffer, sizeof(gps_buffer))) {
-					RS485_SetTransmitMode();
-					vTaskDelay(pdMS_TO_TICKS(2));
-
-					SoftUartPuts(0, (uint8_t *)gps_buffer, strlen(gps_buffer));
-					SoftUartWaitUntilTxComplate(0);
-
-					vTaskDelay(pdMS_TO_TICKS(2));
-				}
-			}
-		}
-
-		// ============================================================
-		// AT 명령어 수신 처리
-		// ============================================================
 		RS485_SetReceiveMode();
 
 		// 수신 데이터가 있는지 체크 (블로킹 방지)
@@ -180,17 +188,20 @@ static void rs485_task(void *pvParameter)
 			}
 			else if (strcmp(rx_buffer, "AT+GUGUSTART\r") == 0)
 			{
-					// GPS 주기 전송 시작
-					gps_tx_enabled = true;
-					last_gps_tx_tick = xTaskGetTickCount();  // 즉시 전송하도록
+					// GPS 전송 Task 시작
+					if (gps_tx_task_handle != NULL) {
+						vTaskResume(gps_tx_task_handle);
+					}
 
 					SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
 					SoftUartWaitUntilTxComplate(0);
 			}
 			else if (strcmp(rx_buffer, "AT+GUGUSTOP\r") == 0)
 			{
-					// GPS 주기 전송 정지
-					gps_tx_enabled = false;
+					// GPS 전송 Task 정지
+					if (gps_tx_task_handle != NULL) {
+						vTaskSuspend(gps_tx_task_handle);
+					}
 
 					SoftUartPuts(0, (uint8_t*)STOP_Response, strlen(STOP_Response));
 					SoftUartWaitUntilTxComplate(0);
@@ -209,14 +220,10 @@ static void rs485_task(void *pvParameter)
 
 void rs485_app_init(void)
 {
+    // RS485 AT 명령어 처리 Task
     xTaskCreate(rs485_task, "RS485_Task", 512, NULL, tskIDLE_PRIORITY + 1, NULL);
+
+    // GPS 전송 Task (초기에는 suspend 상태)
+    xTaskCreate(gps_tx_task, "GPS_TX_Task", 512, NULL, tskIDLE_PRIORITY + 2, &gps_tx_task_handle);
+    vTaskSuspend(gps_tx_task_handle);  // 초기에는 정지 상태
 }
-
-// ============================================================
-// GPS 데이터 주기 전송 기능 (Task 기반)
-// ============================================================
-
-static volatile bool gps_tx_enabled = false;
-static gps_id_t current_gps_id = GPS_ID_0;
-
-#define GPS_TX_INTERVAL_MS_ACTUAL 2000  // 2초 주기
