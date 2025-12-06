@@ -24,13 +24,17 @@ void _gps_gga_raw_add(gps_t *gps, char ch) {
 bool get_gga(gps_t *gps, char *buf, uint8_t *len) {
   bool ret = false;
 
-  xSemaphoreTake(gps->mutex, portMAX_DELAY);
-  if (gps->nmea_data.gga_is_rdy && gps->nmea_data.gga.fix != GPS_FIX_INVALID) {
-    strncpy(buf, gps->nmea_data.gga_raw, gps->nmea_data.gga_raw_pos + 1);
-    *len = gps->nmea_data.gga_raw_pos;
-    ret = true;
+  // 타임아웃 사용 (데드락 방지)
+  // portMAX_DELAY 사용 시 RX Task가 뮤텍스를 오래 잡으면 무한 대기 위험
+  if (xSemaphoreTake(gps->mutex, pdMS_TO_TICKS(100)) == pdTRUE) {
+    if (gps->nmea_data.gga_is_rdy && gps->nmea_data.gga.fix != GPS_FIX_INVALID) {
+      strncpy(buf, gps->nmea_data.gga_raw, gps->nmea_data.gga_raw_pos + 1);
+      *len = gps->nmea_data.gga_raw_pos;
+      ret = true;
+    }
+    xSemaphoreGive(gps->mutex);
   }
-  xSemaphoreGive(gps->mutex);
+  // 타임아웃 발생 시 ret = false 반환
 
   return ret;
 }
