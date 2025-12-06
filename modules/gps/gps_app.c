@@ -305,9 +305,24 @@ static bool gps_configure_um982_base_mode_async(gps_id_t id, gps_init_callback_t
 
   if (params->use_manual_position) {
     // Fixed base station mode with manual position
-    double lat = atof(params->lat);
-    double lon = atof(params->lon);
-    double alt = atof(params->alt);
+    char *endptr;
+    double lat = strtod(params->lat, &endptr);
+    if (endptr == params->lat || *endptr != '\0') {
+      LOG_ERR("GPS[%d] Invalid latitude value: %s", id, params->lat);
+      return false;
+    }
+
+    double lon = strtod(params->lon, &endptr);
+    if (endptr == params->lon || *endptr != '\0') {
+      LOG_ERR("GPS[%d] Invalid longitude value: %s", id, params->lon);
+      return false;
+    }
+
+    double alt = strtod(params->alt, &endptr);
+    if (endptr == params->alt || *endptr != '\0') {
+      LOG_ERR("GPS[%d] Invalid altitude value: %s", id, params->alt);
+      return false;
+    }
 
     return gps_init_um982_base_fixed_async_internal(id, lat, lon, alt, callback, user_data);
   } else {
