@@ -1182,7 +1182,7 @@ bool gps_format_position_data(gps_id_t id, char *buffer, size_t buf_size)
 
   // 포맷팅 (뮤텍스 밖에서 수행)
   int written = snprintf(buffer, buf_size,
-                         "+GPS,%.6f,%c,%.6f,%c,%.1f,%.1f,%.2f,%d\r\n",
+                         "+GPS,%.10lf,%c,%.10lf,%c,%.4lf,%.4lf,%.5lf,%d\r\n",
                          lat, ns, lon, ew,
                          msl_alt,
                          ellipsoid_alt,

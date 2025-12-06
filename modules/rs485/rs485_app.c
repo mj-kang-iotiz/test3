@@ -73,7 +73,9 @@ static void rs485_task(void *pvParameter)
 {
 	char ch;
 	char rx_buffer[64];
+	char gps_buffer[128];
 	uint8_t init_f = 0;
+	uint32_t last_gps_tx_tick = 0;
 
   while(1)
   {
@@ -87,84 +89,118 @@ static void rs485_task(void *pvParameter)
 			SoftUartWaitUntilTxComplate(0);
 			vTaskDelay(pdMS_TO_TICKS(10));
 		}
-		
-		RS485_SetReceiveMode();
-    int len = get_line(0, rx_buffer, sizeof(rx_buffer));  // 문자열 수신
 
-		RS485_SetTransmitMode();
-		HAL_Delay(1);  // RS485 활성 대기
-		// 문자열 비교: 대소문자 구분, 정확히 "TEST\r\n"
-		
-    if (strcmp(rx_buffer, "AT\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)AT_Response, strlen(AT_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "ATZ\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)ATZ_Response, strlen(ATZ_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT&F\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)ATnF_Response, strlen(ATnF_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+VER?\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)F_Version_Response, strlen(F_Version_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+GPSMANUF?\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)GPSMANUF_Response, strlen(GPSMANUF_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+CONFIG?\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)CONFIG_Response, strlen(CONFIG_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+SETBASELINE:xxx\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)SETBASELINE_Response, strlen(SETBASELINE_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+CASTER:xx.xx.xx.xxxx\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)CASTER_Response, strlen(CASTER_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+ID=xxxxx\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)ID_Response, strlen(ID_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+MOUNTPOINT=xxxx\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)MOUNTPOINT_Response, strlen(MOUNTPOINT_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+PASSWORD=xxxxx\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)PASSWORD_Response, strlen(PASSWORD_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+GUGUSTART\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else if (strcmp(rx_buffer, "AT+GUGUSTOP\n") == 0)
-    {
-				SoftUartPuts(0, (uint8_t*)STOP_Response, strlen(STOP_Response));
-				SoftUartWaitUntilTxComplate(0);
-    }
-		else{
-				SoftUartPuts(0, (uint8_t*)ERROR1_Response, strlen(ERROR1_Response));
-				SoftUartWaitUntilTxComplate(0);
+		// ============================================================
+		// GPS 주기 전송 처리
+		// ============================================================
+		if (gps_tx_enabled) {
+			uint32_t now = xTaskGetTickCount();
+			if ((now - last_gps_tx_tick) >= pdMS_TO_TICKS(GPS_TX_INTERVAL_MS_ACTUAL)) {
+				last_gps_tx_tick = now;
+
+				// GPS 데이터 포맷팅 및 전송
+				if (gps_format_position_data(current_gps_id, gps_buffer, sizeof(gps_buffer))) {
+					RS485_SetTransmitMode();
+					vTaskDelay(pdMS_TO_TICKS(2));
+
+					SoftUartPuts(0, (uint8_t *)gps_buffer, strlen(gps_buffer));
+					SoftUartWaitUntilTxComplate(0);
+
+					vTaskDelay(pdMS_TO_TICKS(2));
+				}
+			}
 		}
-		
+
+		// ============================================================
+		// AT 명령어 수신 처리
+		// ============================================================
+		RS485_SetReceiveMode();
+
+		// 수신 데이터가 있는지 체크 (블로킹 방지)
+		if (SoftUartRxAlavailable(0) > 0) {
+			int len = get_line(0, rx_buffer, sizeof(rx_buffer));  // 문자열 수신
+
+			RS485_SetTransmitMode();
+			HAL_Delay(1);  // RS485 활성 대기
+
+			if (strcmp(rx_buffer, "AT\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)AT_Response, strlen(AT_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "ATZ\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)ATZ_Response, strlen(ATZ_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT&F\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)ATnF_Response, strlen(ATnF_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+VER?\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)F_Version_Response, strlen(F_Version_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+GPSMANUF?\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)GPSMANUF_Response, strlen(GPSMANUF_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+CONFIG?\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)CONFIG_Response, strlen(CONFIG_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+SETBASELINE:xxx\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)SETBASELINE_Response, strlen(SETBASELINE_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+CASTER:xx.xx.xx.xxxx\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)CASTER_Response, strlen(CASTER_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+ID=xxxxx\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)ID_Response, strlen(ID_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+MOUNTPOINT=xxxx\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)MOUNTPOINT_Response, strlen(MOUNTPOINT_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+PASSWORD=xxxxx\r") == 0)
+			{
+					SoftUartPuts(0, (uint8_t*)PASSWORD_Response, strlen(PASSWORD_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+GUGUSTART\r") == 0)
+			{
+					// GPS 주기 전송 시작
+					gps_tx_enabled = true;
+					last_gps_tx_tick = xTaskGetTickCount();  // 즉시 전송하도록
+
+					SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else if (strcmp(rx_buffer, "AT+GUGUSTOP\r") == 0)
+			{
+					// GPS 주기 전송 정지
+					gps_tx_enabled = false;
+
+					SoftUartPuts(0, (uint8_t*)STOP_Response, strlen(STOP_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+			else{
+					SoftUartPuts(0, (uint8_t*)ERROR1_Response, strlen(ERROR1_Response));
+					SoftUartWaitUntilTxComplate(0);
+			}
+		}
+
 		RS485_SetReceiveMode();
 
     vTaskDelay(pdMS_TO_TICKS(50));
@@ -177,86 +213,10 @@ void rs485_app_init(void)
 }
 
 // ============================================================
-// GPS 데이터 주기 전송 기능
+// GPS 데이터 주기 전송 기능 (Task 기반)
 // ============================================================
 
-static TimerHandle_t gps_tx_timer = NULL;
+static volatile bool gps_tx_enabled = false;
 static gps_id_t current_gps_id = GPS_ID_0;
 
-/**
- * @brief GPS 데이터 전송 타이머 콜백
- */
-static void gps_tx_timer_callback(TimerHandle_t xTimer)
-{
-  char gps_buffer[128];
-
-  // GPS 데이터 포맷팅 (뮤텍스는 함수 내부에서 처리)
-  if (gps_format_position_data(current_gps_id, gps_buffer, sizeof(gps_buffer))) {
-    // 송신 모드로 전환
-    RS485_SetTransmitMode();
-    vTaskDelay(pdMS_TO_TICKS(2));  // RS485 안정화 대기
-
-    // SoftUART로 전송 (Critical Section으로 보호됨)
-    if (SoftUartPuts(0, (uint8_t *)gps_buffer, strlen(gps_buffer)) == SoftUart_OK) {
-      SoftUartWaitUntilTxComplate(0);
-    }
-
-    vTaskDelay(pdMS_TO_TICKS(2));
-    // 수신 모드로 복귀
-    RS485_SetReceiveMode();
-  }
-}
-
-/**
- * @brief GPS 데이터 주기 전송 시작
- */
-bool rs485_start_gps_transmission(gps_id_t gps_id, uint32_t interval_ms)
-{
-  // 기본 전송 주기 설정
-  if (interval_ms == 0) {
-    interval_ms = GPS_TX_INTERVAL_MS;
-  }
-
-  // GPS ID 저장
-  current_gps_id = gps_id;
-
-  // 기존 타이머가 있으면 삭제
-  if (gps_tx_timer != NULL) {
-    xTimerStop(gps_tx_timer, 0);
-    xTimerDelete(gps_tx_timer, 0);
-  }
-
-  // 타이머 생성 (주기적 실행)
-  gps_tx_timer = xTimerCreate(
-      "GPS_TX_Timer",                   // 타이머 이름
-      pdMS_TO_TICKS(interval_ms),       // 주기
-      pdTRUE,                           // 자동 재시작 (주기적 실행)
-      NULL,                             // 타이머 ID (사용 안 함)
-      gps_tx_timer_callback             // 콜백 함수
-  );
-
-  if (gps_tx_timer == NULL) {
-    return false;
-  }
-
-  // 타이머 시작
-  if (xTimerStart(gps_tx_timer, 0) != pdPASS) {
-    xTimerDelete(gps_tx_timer, 0);
-    gps_tx_timer = NULL;
-    return false;
-  }
-
-  return true;
-}
-
-/**
- * @brief GPS 데이터 주기 전송 정지
- */
-void rs485_stop_gps_transmission(void)
-{
-  if (gps_tx_timer != NULL) {
-    xTimerStop(gps_tx_timer, 0);
-    xTimerDelete(gps_tx_timer, 0);
-    gps_tx_timer = NULL;
-  }
-}
+#define GPS_TX_INTERVAL_MS_ACTUAL 2000  // 2초 주기
