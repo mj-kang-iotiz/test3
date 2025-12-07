@@ -168,11 +168,31 @@ static void rs485_task(void *pvParameter)
 	char ch;
 	char rx_buffer[64];
   char buf[64];
+  uint8_t dummy_buf[64];
 
   const board_config_t *config = board_get_config();
 
   // 시스템 부팅 후 3초 대기 (초기화 완료 대기)
   vTaskDelay(pdMS_TO_TICKS(3000));
+
+  // RX 버퍼 완전히 비우기 (리셋 후 남아있을 수 있는 쓰레기 데이터 제거)
+  while(SoftUartRxAlavailable(0) > 0) {
+    uint8_t available = SoftUartRxAlavailable(0);
+    SoftUartReadRxBuffer(0, dummy_buf, available > 64 ? 64 : available);
+    vTaskDelay(pdMS_TO_TICKS(1));
+  }
+
+  // TX 경로 클리어를 위한 더미 전송 (첫 바이트 손실 방지)
+  RS485_SetTransmitMode();
+  vTaskDelay(pdMS_TO_TICKS(10));  // RS485 DE/RE 핀 안정화
+  uint8_t dummy_tx = '\0';
+  SoftUartPuts(0, &dummy_tx, 1);
+  SoftUartWaitUntilTxComplate(0);
+  vTaskDelay(pdMS_TO_TICKS(10));  // 전송 완료 대기
+  RS485_SetReceiveMode();
+
+  // 추가 안정화 대기
+  vTaskDelay(pdMS_TO_TICKS(50));
 
   // READY 메시지 전송
   RS485_Send((uint8_t*)INIT_Notify, strlen(INIT_Notify));
