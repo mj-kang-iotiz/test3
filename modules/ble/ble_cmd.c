@@ -39,6 +39,7 @@ static void gi_handler(ble_instance_t *inst, const char *param);
 static void gp_handler(ble_instance_t *inst, const char *param);
 static void gg_handler(ble_instance_t *inst, const char *param);
 static void rs_handler(ble_instance_t *inst, const char *param);
+static void manuf_handler(ble_instance_t *inst, const char *param);
 
 void bot_ok_handler(ble_instance_t *inst, const char *param)
 {
@@ -93,6 +94,7 @@ static const ble_at_cmd_entry_t at_cmd_table[] = {
     {"GP", gp_handler},
     {"GG", gg_handler},
     {"RS", rs_handler},
+    {"MANUF", manuf_handler},
     {NULL, NULL}};
 
 void ble_app_cmd_handler(ble_instance_t *inst)
@@ -216,4 +218,43 @@ static void rs_handler(ble_instance_t *inst, const char *param)
     ble_get_handle()->ops->send("Device Reset\n", strlen("Device Reset\n"));
     vTaskDelay(pdMS_TO_TICKS(100));
     NVIC_SystemReset();
+}
+
+// AT+MANUF=xxxx 핸들러
+static void manuf_handler(ble_instance_t *inst, const char *param)
+{
+    // 파라미터 체크: "=xxxx" 형식
+    if (param[0] != '=') {
+        LOG_ERR("MANUF: Invalid format, expected '='");
+        BLE_AT_RESP_SEND_PARAM_ERR();
+        return;
+    }
+
+    // 디바이스 이름 추출 (= 이후)
+    const char *device_name = param + 1;
+    size_t name_len = strlen(device_name);
+
+    // 길이 검증 (최대 8자리)
+    if (name_len == 0 || name_len > 8) {
+        LOG_ERR("MANUF: Device name length must be 1-8 characters (got %d)", name_len);
+        BLE_AT_RESP_SEND_PARAM_ERR();
+        return;
+    }
+
+    // Flash에 저장
+    LOG_INFO("MANUF: Setting device name to '%s'", device_name);
+    flash_params_set_ble_device_name(device_name);
+
+    // BLE 모듈에 AT+MANUF 명령 전송
+    if (ble_set_device_name_async(device_name, 5000)) {
+        LOG_INFO("MANUF: Device name set successfully");
+        BLE_AT_RESP_SEND("+OK\n");
+
+        // Advertising 재시작 알림 (BLE 모듈이 자동으로 재시작)
+        vTaskDelay(pdMS_TO_TICKS(100));
+        BLE_AT_RESP_SEND("+ADVERTISING\n");
+    } else {
+        LOG_ERR("MANUF: Failed to set device name on BLE module");
+        BLE_AT_RESP_SEND("+ERROR\n");
+    }
 }
