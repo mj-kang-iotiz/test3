@@ -846,6 +846,55 @@ void gps_init_all(void) {
 }
 
 /**
+ * @brief GPS 종료 (board_config 기반)
+ *
+ * 모든 GPS 인스턴스의 태스크, 큐, UART를 종료하고 메모리 해제
+ */
+void gps_deinit_all(void) {
+  const board_config_t *config = board_get_config();
+
+  for (uint8_t i = 0; i < config->gps_cnt && i < GPS_ID_MAX; i++) {
+    if (!gps_instances[i].enabled) {
+      continue;
+    }
+
+    LOG_INFO("GPS[%d] 종료 시작", i);
+
+    // 1. UART DMA 중지
+    gps_port_stop(&gps_instances[i].gps);
+
+    // 2. 태스크 삭제
+    if (gps_instances[i].task != NULL) {
+      vTaskDelete(gps_instances[i].task);
+      gps_instances[i].task = NULL;
+    }
+
+    if (gps_instances[i].tx_task != NULL) {
+      vTaskDelete(gps_instances[i].tx_task);
+      gps_instances[i].tx_task = NULL;
+    }
+
+    // 3. 큐 삭제
+    if (gps_instances[i].queue != NULL) {
+      vQueueDelete(gps_instances[i].queue);
+      gps_instances[i].queue = NULL;
+    }
+
+    if (gps_instances[i].cmd_queue != NULL) {
+      vQueueDelete(gps_instances[i].cmd_queue);
+      gps_instances[i].cmd_queue = NULL;
+    }
+
+    // 4. enabled 플래그 비활성화
+    gps_instances[i].enabled = false;
+
+    LOG_INFO("GPS[%d] 종료 완료", i);
+  }
+
+  LOG_INFO("GPS 전체 인스턴스 종료 완료");
+}
+
+/**
  * @brief 특정 GPS ID의 핸들 가져오기
  */
 gps_t *gps_get_instance_handle(gps_id_t id) {

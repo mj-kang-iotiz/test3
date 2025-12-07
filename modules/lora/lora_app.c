@@ -1087,6 +1087,62 @@ void lora_instance_init(void)
   LOG_INFO("LORA 인스턴스 초기화 완료");
 }
 
+/**
+ * @brief LoRa 인스턴스 종료
+ *
+ * 모든 LoRa 태스크, 큐, 뮤텍스를 종료하고 메모리 해제
+ */
+void lora_instance_deinit(void)
+{
+  if (!instance.initialized) {
+    LOG_WARN("LoRa already deinitialized");
+    return;
+  }
+
+  LOG_INFO("LoRa 종료 시작");
+
+  // 1. UART 중지
+  lora_port_stop(&instance.lora);
+
+  // 2. 태스크 삭제
+  if (instance.rx_task != NULL) {
+    vTaskDelete(instance.rx_task);
+    instance.rx_task = NULL;
+    LOG_INFO("LoRa RX 태스크 삭제 완료");
+  }
+
+  if (instance.tx_task != NULL) {
+    vTaskDelete(instance.tx_task);
+    instance.tx_task = NULL;
+    LOG_INFO("LoRa TX 태스크 삭제 완료");
+  }
+
+  // 3. 큐 삭제
+  if (instance.queue != NULL) {
+    vQueueDelete(instance.queue);
+    instance.queue = NULL;
+    LOG_INFO("LoRa RX 큐 삭제 완료");
+  }
+
+  if (instance.cmd_queue != NULL) {
+    vQueueDelete(instance.cmd_queue);
+    instance.cmd_queue = NULL;
+    LOG_INFO("LoRa TX 큐 삭제 완료");
+  }
+
+  // 4. 뮤텍스 삭제
+  if (instance.mutex != NULL) {
+    vSemaphoreDelete(instance.mutex);
+    instance.mutex = NULL;
+    LOG_INFO("LoRa 뮤텍스 삭제 완료");
+  }
+
+  // 5. 초기화 플래그 비활성화
+  instance.initialized = false;
+
+  LOG_INFO("LoRa 종료 완료");
+}
+
 bool lora_send_command_sync(const char *cmd, uint32_t timeout_ms)
 {
   if (!instance.initialized)

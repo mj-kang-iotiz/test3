@@ -8,6 +8,7 @@
 extern QueueHandle_t gsm_queue;
 
 void gsm_task_create(void *arg);
+void gsm_task_destroy(void);
 void gsm_socket_monitor_start(void);
 
 #endif

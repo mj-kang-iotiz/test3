@@ -42,6 +42,13 @@ bool gps_init_um982_rover_async(gps_id_t id, gps_init_callback_t callback);
 void gps_init_all(void);
 
 /**
+ * @brief GPS 종료 (board_config 기반)
+ *
+ * 모든 GPS 인스턴스의 태스크, 큐, UART를 종료하고 메모리 해제
+ */
+void gps_deinit_all(void);
+
+/**
  * @brief GPS 태스크 생성 (레거시 호환용)
  *
  * @param arg 사용하지 않음 (board_config로 자동 설정)

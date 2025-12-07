@@ -4,6 +4,9 @@
 #include "task.h"
 #include "timers.h"
 #include "gps_app.h"
+#include "gsm_app.h"
+#include "lora_app.h"
+#include "board_config.h"
 #include <stdio.h>
 #include <string.h>
 
@@ -152,18 +155,42 @@ static void rs485_task(void *pvParameter)
     }
 		else if (strcmp(rx_buffer, "AT+GUGUSTART\n") == 0)
     {
-				// GPS 데이터 주기 전송 시작
-				if (rs485_start_gps_transmission(GPS_ID_0, 0)) {
-					SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
-				} else {
-					SoftUartPuts(0, (uint8_t*)ERROR3_Response, strlen(ERROR3_Response));
+				// 측정 시작: GPS, LTE, LoRa 모듈 초기화
+				const board_config_t *config = board_get_config();
+
+				// RS485 GPS 전송 중지 (이미 실행 중이면)
+				rs485_stop_gps_transmission();
+
+				// 1. GPS 초기화
+				gps_init_all();
+
+				// 2. GSM(LTE) 초기화
+				if (config->use_gsm) {
+					gsm_task_create(NULL);
 				}
+
+				// 3. LoRa 초기화
+				lora_instance_init();
+
+				SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
 				SoftUartWaitUntilTxComplate(0);
     }
 		else if (strcmp(rx_buffer, "AT+GUGUSTOP\n") == 0)
     {
-				// GPS 데이터 주기 전송 중지
+				// 측정 중지: GPS, LTE, LoRa 모듈 종료
+
+				// RS485 GPS 전송 중지
 				rs485_stop_gps_transmission();
+
+				// 1. LoRa 종료
+				lora_instance_deinit();
+
+				// 2. GSM(LTE) 종료
+				gsm_task_destroy();
+
+				// 3. GPS 종료
+				gps_deinit_all();
+
 				SoftUartPuts(0, (uint8_t*)STOP_Response, strlen(STOP_Response));
 				SoftUartWaitUntilTxComplate(0);
     }

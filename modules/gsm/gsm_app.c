@@ -19,6 +19,9 @@ char gsm_mem[2048];
 gsm_t gsm_handle;
 QueueHandle_t gsm_queue;
 
+static TaskHandle_t gsm_main_task_handle = NULL;
+static TaskHandle_t gsm_at_cmd_task_handle = NULL;
+static TimerHandle_t gsm_network_timer_handle = NULL;
 
 void gsm_socket_monitor_stop(void);
 void gsm_socket_update_recv_time(uint8_t connect_id);
@@ -32,7 +35,54 @@ static void gsm_at_cmd_process_task(void *pvParameters);
  * @param arg
  */
 void gsm_task_create(void *arg) {
-  xTaskCreate(gsm_process_task, "gsm", 1536, arg, tskIDLE_PRIORITY + 1, NULL);
+  xTaskCreate(gsm_process_task, "gsm", 1536, arg, tskIDLE_PRIORITY + 1, &gsm_main_task_handle);
+}
+
+/**
+ * @brief GSM 태스크 종료
+ *
+ * 모든 GSM 관련 태스크, 타이머, 큐를 종료하고 메모리 해제
+ */
+void gsm_task_destroy(void) {
+  LOG_INFO("GSM 종료 시작");
+
+  // 1. NTRIP 태스크 삭제
+  if (ntrip_task_handle != NULL) {
+    vTaskDelete(ntrip_task_handle);
+    ntrip_task_handle = NULL;
+    LOG_INFO("NTRIP 태스크 삭제 완료");
+  }
+
+  // 2. AT 커맨드 처리 태스크 삭제
+  if (gsm_at_cmd_task_handle != NULL) {
+    vTaskDelete(gsm_at_cmd_task_handle);
+    gsm_at_cmd_task_handle = NULL;
+    LOG_INFO("GSM AT 커맨드 태스크 삭제 완료");
+  }
+
+  // 3. 네트워크 타이머 삭제
+  if (gsm_network_timer_handle != NULL) {
+    xTimerStop(gsm_network_timer_handle, 0);
+    xTimerDelete(gsm_network_timer_handle, 0);
+    gsm_network_timer_handle = NULL;
+    LOG_INFO("네트워크 타이머 삭제 완료");
+  }
+
+  // 4. 메인 GSM 태스크 삭제
+  if (gsm_main_task_handle != NULL) {
+    vTaskDelete(gsm_main_task_handle);
+    gsm_main_task_handle = NULL;
+    LOG_INFO("GSM 메인 태스크 삭제 완료");
+  }
+
+  // 5. 큐 삭제
+  if (gsm_queue != NULL) {
+    vQueueDelete(gsm_queue);
+    gsm_queue = NULL;
+    LOG_INFO("GSM 큐 삭제 완료");
+  }
+
+  LOG_INFO("GSM 종료 완료");
 }
 
 
@@ -126,7 +176,7 @@ static void gsm_process_task(void *pvParameter) {
   gsm_queue = xQueueCreate(10, 1);
 
   // 네트워크 체크 타이머 생성 (한 번만, 재사용)
-  TimerHandle_t network_timer =
+  gsm_network_timer_handle =
       xTimerCreate("lte_net_chk", pdMS_TO_TICKS(LTE_NETWORK_CHECK_INTERVAL_MS),
                    pdFALSE, // one-shot
                    NULL, lte_network_check_timer_callback);
@@ -137,11 +187,11 @@ static void gsm_process_task(void *pvParameter) {
 
   // LTE 초기화 모듈 설정
   lte_set_gsm_handle(&gsm_handle);
-  lte_set_network_check_timer(network_timer);
+  lte_set_network_check_timer(gsm_network_timer_handle);
 
   // AT 커맨드 처리 태스크 생성
   xTaskCreate(gsm_at_cmd_process_task, "gsm_at_cmd", 1536, &gsm_handle,
-              tskIDLE_PRIORITY + 2, NULL);
+              tskIDLE_PRIORITY + 2, &gsm_at_cmd_task_handle);
 
   led_set_color(1, LED_COLOR_RED);
   led_set_state(1, true);
