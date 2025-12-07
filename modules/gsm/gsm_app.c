@@ -75,11 +75,59 @@ void gsm_task_destroy(void) {
     LOG_INFO("GSM 메인 태스크 삭제 완료");
   }
 
-  // 5. 큐 삭제
+  // 5. TCP 태스크 삭제
+  if (gsm_handle.tcp.task_handle != NULL) {
+    vTaskDelete(gsm_handle.tcp.task_handle);
+    gsm_handle.tcp.task_handle = NULL;
+    LOG_INFO("TCP 태스크 삭제 완료");
+  }
+
+  // 6. TCP 소켓 pbuf 체인 해제
+  for (int i = 0; i < GSM_TCP_MAX_SOCKETS; i++) {
+    if (gsm_handle.tcp.sockets[i].pbuf_head != NULL) {
+      tcp_pbuf_free_chain(gsm_handle.tcp.sockets[i].pbuf_head);
+      gsm_handle.tcp.sockets[i].pbuf_head = NULL;
+      gsm_handle.tcp.sockets[i].pbuf_tail = NULL;
+      gsm_handle.tcp.sockets[i].pbuf_total_len = 0;
+    }
+  }
+
+  // 7. 큐 삭제
   if (gsm_queue != NULL) {
     vQueueDelete(gsm_queue);
     gsm_queue = NULL;
     LOG_INFO("GSM 큐 삭제 완료");
+  }
+
+  if (gsm_handle.at_cmd_queue != NULL) {
+    vQueueDelete(gsm_handle.at_cmd_queue);
+    gsm_handle.at_cmd_queue = NULL;
+    LOG_INFO("AT 커맨드 큐 삭제 완료");
+  }
+
+  if (gsm_handle.tcp.event_queue != NULL) {
+    vQueueDelete(gsm_handle.tcp.event_queue);
+    gsm_handle.tcp.event_queue = NULL;
+    LOG_INFO("TCP 이벤트 큐 삭제 완료");
+  }
+
+  // 8. 뮤텍스/세마포어 삭제
+  if (gsm_handle.cmd_mutex != NULL) {
+    vSemaphoreDelete(gsm_handle.cmd_mutex);
+    gsm_handle.cmd_mutex = NULL;
+    LOG_INFO("CMD 뮤텍스 삭제 완료");
+  }
+
+  if (gsm_handle.producer_sem != NULL) {
+    vSemaphoreDelete(gsm_handle.producer_sem);
+    gsm_handle.producer_sem = NULL;
+    LOG_INFO("Producer 세마포어 삭제 완료");
+  }
+
+  if (gsm_handle.tcp.tcp_mutex != NULL) {
+    vSemaphoreDelete(gsm_handle.tcp.tcp_mutex);
+    gsm_handle.tcp.tcp_mutex = NULL;
+    LOG_INFO("TCP 뮤텍스 삭제 완료");
   }
 
   LOG_INFO("GSM 종료 완료");

@@ -885,7 +885,13 @@ void gps_deinit_all(void) {
       gps_instances[i].cmd_queue = NULL;
     }
 
-    // 4. enabled 플래그 비활성화
+    // 4. 뮤텍스 삭제
+    if (gps_instances[i].gps.mutex != NULL) {
+      vSemaphoreDelete(gps_instances[i].gps.mutex);
+      gps_instances[i].gps.mutex = NULL;
+    }
+
+    // 5. enabled 플래그 비활성화
     gps_instances[i].enabled = false;
 
     LOG_INFO("GPS[%d] 종료 완료", i);
