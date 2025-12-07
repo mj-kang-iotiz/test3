@@ -161,6 +161,18 @@ static void rs485_task(void *pvParameter)
 				// RS485 GPS 전송 중지 (이미 실행 중이면)
 				rs485_stop_gps_transmission();
 
+
+				// 이중 초기화 방지: 기존 리소스가 있으면 먼저 정리
+				// 1. LoRa 종료 (이미 초기화되어 있으면)
+				lora_instance_deinit();
+
+				// 2. GSM(LTE) 종료 (이미 초기화되어 있으면)
+				gsm_task_destroy();
+
+				// 3. GPS 종료 (이미 초기화되어 있으면)
+				gps_deinit_all();
+
+				// 이제 안전하게 새로 초기화
 				// 1. GPS 초기화
 				gps_init_all();
 
