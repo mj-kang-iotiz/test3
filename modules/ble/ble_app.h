@@ -100,6 +100,9 @@ ble_at_status_t ble_send_at_command_async(const char *at_cmd, const char *expect
 // BLE 디바이스 이름 설정 (AT+MANUF=<name>)
 bool ble_set_device_name_async(const char *device_name, uint32_t timeout_ms);
 
+// BLE 디바이스 이름 조회 (AT+MANUF?)
+bool ble_get_device_name_async(char *device_name_buf, size_t buf_size, uint32_t timeout_ms);
+
 // BLE UART 통신 속도 설정 (AT+UART=<baudrate>)
 bool ble_set_uart_baudrate_async(uint32_t baudrate, uint32_t timeout_ms);
 

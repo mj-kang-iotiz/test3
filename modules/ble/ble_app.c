@@ -457,6 +457,54 @@ bool ble_set_device_name_async(const char *device_name, uint32_t timeout_ms) {
   return false;
 }
 
+// BLE 디바이스 이름 조회 (AT+MANUF?)
+bool ble_get_device_name_async(char *device_name_buf, size_t buf_size, uint32_t timeout_ms) {
+  if (!device_name_buf || buf_size == 0) {
+    LOG_ERR("Invalid buffer parameters");
+    return false;
+  }
+
+  // AT+MANUF?\r 커맨드 생성
+  char at_cmd[16];
+  snprintf(at_cmd, sizeof(at_cmd), "AT+MANUF?\r");
+
+  // 응답 버퍼
+  char response[BLE_AT_RESPONSE_MAX_SIZE];
+  memset(response, 0, sizeof(response));
+
+  // 비동기 AT 커맨드 전송 (모든 응답을 받기 위해 expected_response를 빈 문자열로)
+  // BLE 모듈은 디바이스 이름만 응답하므로 어떤 응답이든 받아야 함
+  ble_at_status_t status = ble_send_at_command_async(at_cmd, "", response, sizeof(response), timeout_ms);
+
+  if (status == BLE_AT_STATUS_COMPLETED || status == BLE_AT_STATUS_TIMEOUT) {
+    // 응답에서 개행문자 제거
+    size_t resp_len = strlen(response);
+    while (resp_len > 0 && (response[resp_len - 1] == '\n' || response[resp_len - 1] == '\r')) {
+      response[resp_len - 1] = '\0';
+      resp_len--;
+    }
+
+    if (resp_len > 0) {
+      // 버퍼에 복사
+      size_t copy_len = (resp_len < buf_size - 1) ? resp_len : (buf_size - 1);
+      memcpy(device_name_buf, response, copy_len);
+      device_name_buf[copy_len] = '\0';
+
+      LOG_INFO("Device name retrieved: %s", device_name_buf);
+      return true;
+    } else {
+      LOG_ERR("Empty response from BLE module");
+      return false;
+    }
+  } else if (status == BLE_AT_STATUS_ERROR) {
+    LOG_ERR("Device name query error: %s", response);
+    return false;
+  }
+
+  LOG_ERR("Device name query failed with status: %d", status);
+  return false;
+}
+
 bool ble_set_advon_async(uint32_t timeout_ms) {
   // AT+MANUF=<name>\r\n 커맨드 생성
   char at_cmd[16];

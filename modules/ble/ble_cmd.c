@@ -225,13 +225,21 @@ static void rs_handler(ble_instance_t *inst, const char *param)
 // AT+MANUF? 핸들러 (디바이스 이름 조회)
 static void manuf_query_handler(ble_instance_t *inst, const char *param)
 {
-    user_params_t *params = flash_params_get_current();
+    char device_name[32];
     char response[64];
 
-    // 현재 설정된 디바이스 이름을 응답
-    snprintf(response, sizeof(response), "%s\n", params->ble_device_name);
-    LOG_INFO("MANUF?: Returning device name '%s'", params->ble_device_name);
-    BLE_AT_RESP_SEND(response);
+    // BLE 모듈에서 실제 디바이스 이름 조회
+    LOG_INFO("MANUF?: Querying device name from BLE module");
+    if (ble_get_device_name_async(device_name, sizeof(device_name), 5000)) {
+        // 조회 성공 - 디바이스 이름을 응답
+        snprintf(response, sizeof(response), "%s\n", device_name);
+        LOG_INFO("MANUF?: Returning device name '%s'", device_name);
+        BLE_AT_RESP_SEND(response);
+    } else {
+        // 조회 실패 - 에러 응답
+        LOG_ERR("MANUF?: Failed to query device name from BLE module");
+        BLE_AT_RESP_SEND("+ERROR\n");
+    }
 }
 
 // AT+MANUF=xxxx 핸들러
