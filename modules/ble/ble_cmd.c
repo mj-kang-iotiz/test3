@@ -39,6 +39,7 @@ static void gi_handler(ble_instance_t *inst, const char *param);
 static void gp_handler(ble_instance_t *inst, const char *param);
 static void gg_handler(ble_instance_t *inst, const char *param);
 static void rs_handler(ble_instance_t *inst, const char *param);
+static void manuf_query_handler(ble_instance_t *inst, const char *param);
 static void manuf_handler(ble_instance_t *inst, const char *param);
 
 void bot_ok_handler(ble_instance_t *inst, const char *param)
@@ -94,6 +95,7 @@ static const ble_at_cmd_entry_t at_cmd_table[] = {
     {"GP", gp_handler},
     {"GG", gg_handler},
     {"RS", rs_handler},
+    {"MANUF?", manuf_query_handler},  // MANUF보다 먼저 체크해야 함
     {"MANUF", manuf_handler},
     {NULL, NULL}};
 
@@ -218,6 +220,18 @@ static void rs_handler(ble_instance_t *inst, const char *param)
     ble_get_handle()->ops->send("Device Reset\n", strlen("Device Reset\n"));
     vTaskDelay(pdMS_TO_TICKS(100));
     NVIC_SystemReset();
+}
+
+// AT+MANUF? 핸들러 (디바이스 이름 조회)
+static void manuf_query_handler(ble_instance_t *inst, const char *param)
+{
+    user_params_t *params = flash_params_get_current();
+    char response[64];
+
+    // 현재 설정된 디바이스 이름을 응답
+    snprintf(response, sizeof(response), "%s\n", params->ble_device_name);
+    LOG_INFO("MANUF?: Returning device name '%s'", params->ble_device_name);
+    BLE_AT_RESP_SEND(response);
 }
 
 // AT+MANUF=xxxx 핸들러
