@@ -498,6 +498,26 @@ void ntrip_task_create(gsm_t *gsm)
               tskIDLE_PRIORITY + 3, NULL);
 }
 
+/**
+ * @brief NTRIP 리소스 정리
+ *
+ * GGA 송신 큐 등 NTRIP 관련 리소스 해제
+ */
+void ntrip_cleanup(void)
+{
+  // GGA 송신 큐 삭제
+  if (g_gga_send_queue != NULL) {
+    vQueueDelete(g_gga_send_queue);
+    g_gga_send_queue = NULL;
+    LOG_INFO("NTRIP GGA 큐 삭제 완료");
+  }
+
+  // static 변수 초기화
+  g_ntrip_socket = NULL;
+  g_ntrip_connected = false;
+  g_gga_send_task_handle = NULL;
+}
+
 int ntrip_send_gga_data(const char *data, uint8_t len)
 {
   if (!data || len == 0 || len >= NTRIP_GGA_MAX_LEN)

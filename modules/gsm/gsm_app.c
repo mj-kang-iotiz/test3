@@ -46,12 +46,13 @@ void gsm_task_create(void *arg) {
 void gsm_task_destroy(void) {
   LOG_INFO("GSM 종료 시작");
 
-  // 1. NTRIP 태스크 삭제
+  // 1. NTRIP 태스크 삭제 및 리소스 정리
   if (ntrip_task_handle != NULL) {
     vTaskDelete(ntrip_task_handle);
     ntrip_task_handle = NULL;
     LOG_INFO("NTRIP 태스크 삭제 완료");
   }
+  ntrip_cleanup();  // NTRIP 큐 및 static 변수 정리
 
   // 2. AT 커맨드 처리 태스크 삭제
   if (gsm_at_cmd_task_handle != NULL) {
