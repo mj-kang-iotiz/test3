@@ -152,11 +152,18 @@ static void rs485_task(void *pvParameter)
     }
 		else if (strcmp(rx_buffer, "AT+GUGUSTART\n") == 0)
     {
-				SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
+				// GPS 데이터 주기 전송 시작
+				if (rs485_start_gps_transmission(GPS_ID_0, 0)) {
+					SoftUartPuts(0, (uint8_t*)START_Response, strlen(START_Response));
+				} else {
+					SoftUartPuts(0, (uint8_t*)ERROR3_Response, strlen(ERROR3_Response));
+				}
 				SoftUartWaitUntilTxComplate(0);
     }
 		else if (strcmp(rx_buffer, "AT+GUGUSTOP\n") == 0)
     {
+				// GPS 데이터 주기 전송 중지
+				rs485_stop_gps_transmission();
 				SoftUartPuts(0, (uint8_t*)STOP_Response, strlen(STOP_Response));
 				SoftUartWaitUntilTxComplate(0);
     }
