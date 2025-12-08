@@ -79,6 +79,7 @@ static const ble_at_cmd_entry_t bot_cmd_table[] = {
     {"+ADVERTISING", bot_advertising_handler},
     {"+CONNECTED", bot_connected_handler},
     {"+DISCONNECTED", bot_disconnected_handler},
+    {NULL, NULL}  // 종료 표시
 };
 
 static const ble_at_cmd_entry_t at_cmd_table[] = {
@@ -149,12 +150,15 @@ void ble_at_cmd_handler(ble_instance_t *inst)
 
     // 비동기 AT 명령어 요청이 있는지 확인 (콜백 기반)
     if (inst->async_at_cmd.is_active) {
+        LOG_DEBUG("Async AT active, checking response: [%s]", inst->parser.data);
+
         // +OK 또는 +ERROR 응답 확인
         bool is_ok = (strncmp(inst->parser.data, "+OK", 3) == 0);
         bool is_error = (strncmp(inst->parser.data, "+ERROR", 6) == 0);
 
         if (is_ok || is_error) {
-            LOG_INFO("Async AT command response: %s", inst->parser.data);
+            LOG_INFO("Async AT command response: [%s] -> %s",
+                     inst->parser.data, is_ok ? "SUCCESS" : "ERROR");
 
             // 콜백 호출
             if (inst->async_at_cmd.callback) {
@@ -172,6 +176,8 @@ void ble_at_cmd_handler(ble_instance_t *inst)
 
             LOG_INFO("Switched back to bypass mode");
             return;
+        } else {
+            LOG_DEBUG("Response does not match +OK or +ERROR, ignoring: [%s]", inst->parser.data);
         }
     }
 

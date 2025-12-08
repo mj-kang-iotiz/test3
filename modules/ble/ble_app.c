@@ -633,6 +633,8 @@ static void ble_check_async_at_timeout(void) {
 }
 
 // 비동기 AT 명령어 전송 (콜백 기반, 즉시 반환)
+// 주의: 이 함수는 RX task의 mutex 안에서 호출될 수 있으므로
+// mutex 사용을 최소화함
 bool ble_send_at_cmd_truly_async(const char *at_cmd, ble_at_command_callback_t callback,
                                    void *user_data, uint32_t timeout_ms) {
   if (!ble_instance.enabled) {
@@ -645,24 +647,22 @@ bool ble_send_at_cmd_truly_async(const char *at_cmd, ble_at_command_callback_t c
     return false;
   }
 
-  xSemaphoreTake(ble_instance.mutex, portMAX_DELAY);
-
-  // 이미 진행 중인 비동기 명령어가 있는지 확인
+  // 이미 진행 중인 비동기 명령어가 있는지 확인 (mutex 없이 체크)
+  // RX task 내에서 호출되므로 이미 보호되어 있음
   if (ble_instance.async_at_cmd.is_active) {
-    xSemaphoreGive(ble_instance.mutex);
     LOG_ERR("Another async AT command is active");
     return false;
   }
 
-  // 비동기 요청 설정
+  // 비동기 요청 설정 (mutex 없이 직접 설정)
+  // RX task 내에서 호출되므로 이미 보호되어 있음
   strncpy(ble_instance.async_at_cmd.command, at_cmd, sizeof(ble_instance.async_at_cmd.command) - 1);
+  ble_instance.async_at_cmd.command[sizeof(ble_instance.async_at_cmd.command) - 1] = '\0';
   ble_instance.async_at_cmd.callback = callback;
   ble_instance.async_at_cmd.user_data = user_data;
   ble_instance.async_at_cmd.start_tick = xTaskGetTickCount();
   ble_instance.async_at_cmd.timeout_ticks = pdMS_TO_TICKS(timeout_ms);
   ble_instance.async_at_cmd.is_active = true;
-
-  xSemaphoreGive(ble_instance.mutex);
 
   // AT 모드로 전환
   LOG_INFO("Switching to AT mode for async command");
@@ -670,19 +670,15 @@ bool ble_send_at_cmd_truly_async(const char *at_cmd, ble_at_command_callback_t c
     ble_instance.ble.ops->at_mode();
   }
 
-  xSemaphoreTake(ble_instance.mutex, portMAX_DELAY);
+  // 모드 상태 업데이트 (mutex 없이)
   ble_instance.current_mode = BLE_MODE_AT;
-  xSemaphoreGive(ble_instance.mutex);
 
-  // 모드 전환 대기
-  vTaskDelay(pdMS_TO_TICKS(100));
-
-  // AT 커맨드 전송
+  // AT 커맨드 전송 (TX queue로 전송, 블로킹 없음)
   LOG_INFO("Sending async AT command: %s", at_cmd);
+
+  // ble_send는 TX queue에만 넣으므로 빠르게 반환됨
   if (!ble_send(at_cmd, strlen(at_cmd), true)) {
-    xSemaphoreTake(ble_instance.mutex, portMAX_DELAY);
     ble_instance.async_at_cmd.is_active = false;
-    xSemaphoreGive(ble_instance.mutex);
 
     // Bypass 모드로 복귀
     if (ble_instance.ble.ops && ble_instance.ble.ops->bypass_mode) {
@@ -694,7 +690,7 @@ bool ble_send_at_cmd_truly_async(const char *at_cmd, ble_at_command_callback_t c
     return false;
   }
 
-  LOG_INFO("Async AT command sent successfully, waiting for response");
+  LOG_INFO("Async AT command queued successfully");
   return true;
 }
 
