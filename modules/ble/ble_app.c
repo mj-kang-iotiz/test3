@@ -458,7 +458,7 @@ bool ble_set_device_name_async(const char *device_name, uint32_t timeout_ms) {
 }
 
 bool ble_set_advon_async(uint32_t timeout_ms) {
-  // AT+MANUF=<name>\r\n 커맨드 생성
+  // AT+ADVON\r 커맨드 생성
   char at_cmd[16];
   snprintf(at_cmd, sizeof(at_cmd), "AT+ADVON\r");
 
@@ -480,6 +480,33 @@ bool ble_set_advon_async(uint32_t timeout_ms) {
   }
 
   LOG_ERR("setting failed with status: %d", status);
+  return false;
+}
+
+// BLE 연결 해제 (AT+DISCONNECT)
+bool ble_disconnect_async(uint32_t timeout_ms) {
+  // AT+DISCONNECT\r 커맨드 생성
+  char at_cmd[32];
+  snprintf(at_cmd, sizeof(at_cmd), "AT+DISCONNECT\r");
+
+  // 응답 버퍼
+  char response[BLE_AT_RESPONSE_MAX_SIZE];
+
+  // 비동기 AT 커맨드 전송 (+OK 응답 기대)
+  ble_at_status_t status = ble_send_at_command_async(at_cmd, "+OK", response, sizeof(response), timeout_ms);
+
+  if (status == BLE_AT_STATUS_COMPLETED) {
+    LOG_INFO("BLE disconnect successfully");
+    return true;
+  } else if (status == BLE_AT_STATUS_TIMEOUT) {
+    LOG_ERR("BLE disconnect timeout");
+    return false;
+  } else if (status == BLE_AT_STATUS_ERROR) {
+    LOG_ERR("BLE disconnect error: %s", response);
+    return false;
+  }
+
+  LOG_ERR("BLE disconnect failed with status: %d", status);
   return false;
 }
 
