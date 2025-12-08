@@ -139,12 +139,14 @@ __attribute__((section(".ccmram"))) static char g_ntrip_http_request[512]; // �
 // NTRIP TCP 소켓 (GGA 전송용)
 static tcp_socket_t *g_ntrip_socket = NULL;
 static bool g_ntrip_connected = false;
+static bool g_ntrip_should_stop = false;
 
 // GGA 전송 큐
 static QueueHandle_t g_gga_send_queue = NULL;
 
-// GGA 송신 태스크 핸들
+// 태스크 핸들
 static TaskHandle_t g_gga_send_task_handle = NULL;
+static TaskHandle_t g_ntrip_recv_task_handle = NULL;
 
 static int ntrip_connect_to_server(tcp_socket_t *sock)
 {
@@ -348,6 +350,13 @@ static void ntrip_tcp_recv_task(void *pvParameter)
 
   while (1)
   {
+    // 중지 플래그 확인
+    if (g_ntrip_should_stop)
+    {
+      LOG_INFO("NTRIP 중지 요청됨");
+      break;
+    }
+
     ret = tcp_recv(sock, recv_buf, sizeof(recv_buf), 0);
 
     if (ret > 0)
@@ -494,8 +503,9 @@ static void ntrip_tcp_recv_task(void *pvParameter)
 
 void ntrip_task_create(gsm_t *gsm)
 {
+  g_ntrip_should_stop = false;
   xTaskCreate(ntrip_tcp_recv_task, "ntrip_recv", 1536, gsm,
-              tskIDLE_PRIORITY + 3, NULL);
+              tskIDLE_PRIORITY + 3, &g_ntrip_recv_task_handle);
 }
 
 int ntrip_send_gga_data(const char *data, uint8_t len)
@@ -539,4 +549,24 @@ int ntrip_send_gga_data(const char *data, uint8_t len)
 bool ntrip_gga_send_queue_initialized(void)
 {
   return g_gga_send_queue != NULL;
+}
+
+void ntrip_stop(void)
+{
+  if (!g_ntrip_connected && !g_ntrip_recv_task_handle)
+  {
+    LOG_INFO("NTRIP이 이미 중지되어 있음");
+    return;
+  }
+
+  LOG_INFO("NTRIP 중지 시작");
+
+  // 중지 플래그 설정
+  g_ntrip_should_stop = true;
+  g_ntrip_connected = false;
+
+  // 태스크가 정상 종료될 시간을 줌
+  vTaskDelay(pdMS_TO_TICKS(100));
+
+  LOG_INFO("NTRIP 중지 완료");
 }

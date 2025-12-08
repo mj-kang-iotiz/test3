@@ -415,6 +415,7 @@ void gps_evt_handler(gps_t *gps, gps_event_t event, gps_procotol_t protocol,
                      gps_msg_t msg) {
   gps_instance_t *inst = NULL;
   const board_config_t *config = board_get_config();
+  static gps_fix_t prev_fix_quality = GPS_FIX_INVALID;
 
   for (uint8_t i = 0; i < GPS_CNT; i++) {
     if (gps_instances[i].enabled && &gps_instances[i].gps == gps) {
@@ -435,7 +436,17 @@ void gps_evt_handler(gps_t *gps, gps_event_t event, gps_procotol_t protocol,
     	    {
     	        _add_gga_avg_data(inst, gps->nmea_data.gga.lat, gps->nmea_data.gga.lon,
     	                          gps->nmea_data.gga.alt);
+
+    	        // Quality 7에 도달하면 NTRIP 중지
+    	        if (prev_fix_quality != GPS_FIX_MANUAL_POS)
+    	        {
+    	            LOG_INFO("Base 모드: Quality 7 도달, NTRIP 중지");
+    	            ntrip_stop();
+    	        }
     	    }
+
+    	    // 이전 quality 업데이트
+    	    prev_fix_quality = gps->nmea_data.gga.fix;
     	}
 
       if (gps->nmea_data.gga_is_rdy)
