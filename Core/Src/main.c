@@ -116,6 +116,15 @@ void initThread(void *pvParameter) {
   if(config->use_ble)
   {
 	  ble_init_all();
+
+	  // BLE RX/TX Task 시작 대기
+	  vTaskDelay(pdMS_TO_TICKS(500));
+
+	  // 비동기로 디바이스 이름 설정 (RX Task가 응답 처리)
+	  user_params_t *params = flash_params_get_current();
+	  if (params != NULL && params->ble_device_name[0] != '\0') {
+	    ble_set_device_name_async(params->ble_device_name, 2000);
+	  }
   }
 
   vTaskDelete(NULL);

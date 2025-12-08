@@ -130,30 +130,6 @@ static void ble_tx_task(void *pvParameter) {
   vTaskDelete(NULL);
 }
 
-// BLE 비동기 설정 Task (RX/TX Task 시작 후 실행)
-static void ble_async_config_task(void *pvParameter) {
-  ble_instance_t *inst = (ble_instance_t *)pvParameter;
-
-  LOG_INFO("BLE async config task started");
-
-  // RX/TX Task가 준비될 때까지 대기
-  vTaskDelay(pdMS_TO_TICKS(500));
-
-  // 디바이스 이름 설정
-  user_params_t *params = flash_params_get_current();
-  if (params != NULL && params->ble_device_name[0] != '\0') {
-    LOG_INFO("Setting BLE device name asynchronously: %s", params->ble_device_name);
-    if (ble_set_device_name_async(params->ble_device_name, 2000)) {
-      LOG_INFO("BLE device name configured successfully");
-    } else {
-      LOG_ERR("Failed to configure BLE device name");
-    }
-  }
-
-  LOG_INFO("BLE async config task completed");
-  vTaskDelete(NULL);
-}
-
 static void ble_rx_task(void *pvParameter) {
   ble_instance_t *inst = (ble_instance_t *)pvParameter;
 
@@ -281,15 +257,6 @@ void ble_init_all(void) {
     LOG_ERR("BLE TX 태스크 생성 실패");
     ble_instance.enabled = false;
     return;
-  }
-
-  // 비동기 설정 Task 생성 (RX/TX Task 시작 후 디바이스 이름 설정)
-  ret = xTaskCreate(ble_async_config_task, "ble_cfg", 512,
-                    (void *)&ble_instance,
-                    tskIDLE_PRIORITY + 1, NULL);
-
-  if (ret != pdPASS) {
-    LOG_WARN("BLE 비동기 설정 태스크 생성 실패 (디바이스 이름 설정 불가)");
   }
 
   LOG_INFO("BLE 초기화 완료");
