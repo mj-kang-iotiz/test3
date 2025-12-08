@@ -40,6 +40,9 @@ typedef enum {
 // Bypass 모드 RX 데이터 콜백
 typedef void (*ble_bypass_rx_callback_t)(const uint8_t *data, size_t len);
 
+// AT 명령어 완료 콜백 (비동기 - 논블로킹)
+typedef void (*ble_at_complete_callback_t)(ble_at_status_t status, const char *response, void *user_data);
+
 typedef struct {
   char expected_response[32];     // 기대하는 응답 문자열 (예: "+OK", "+ERROR")
   char response_buf[BLE_AT_RESPONSE_MAX_SIZE];  // 실제 받은 응답
@@ -47,6 +50,9 @@ typedef struct {
   SemaphoreHandle_t wait_sem;     // 응답 대기용 세마포어
   ble_at_status_t status;
   TickType_t timeout_ticks;       // 타임아웃 (ticks)
+  TickType_t start_time;          // 시작 시간 (타임아웃 체크용)
+  ble_at_complete_callback_t callback;  // 완료 콜백 (NULL이면 세마포어 사용)
+  void *user_data;                // 콜백에 전달할 사용자 데이터
 } ble_async_at_request_t;
 
 typedef struct {
@@ -92,13 +98,24 @@ ble_t *ble_get_handle(void);
 ble_instance_t* ble_get_instance(void);
 bool ble_send(const char *data, size_t len, bool is_at);
 
-// 비동기 AT 커맨드 전송 (응답 대기)
+// 비동기 AT 커맨드 전송 (응답 대기 - 블로킹)
 ble_at_status_t ble_send_at_command_async(const char *at_cmd, const char *expected_response,
                                            char *response_buf, size_t response_buf_size,
                                            uint32_t timeout_ms);
 
-// BLE 디바이스 이름 설정 (AT+MANUF=<name>)
+// 비동기 AT 커맨드 전송 (논블로킹 - 콜백 방식)
+bool ble_send_at_command_nonblocking(const char *at_cmd, const char *expected_response,
+                                       uint32_t timeout_ms,
+                                       ble_at_complete_callback_t callback,
+                                       void *user_data);
+
+// BLE 디바이스 이름 설정 (AT+MANUF=<name>) - 블로킹
 bool ble_set_device_name_async(const char *device_name, uint32_t timeout_ms);
+
+// BLE 디바이스 이름 설정 (AT+MANUF=<name>) - 논블로킹 (콜백 방식)
+bool ble_set_device_name_nonblocking(const char *device_name, uint32_t timeout_ms,
+                                      ble_at_complete_callback_t callback,
+                                      void *user_data);
 
 // BLE UART 통신 속도 설정 (AT+UART=<baudrate>)
 bool ble_set_uart_baudrate_async(uint32_t baudrate, uint32_t timeout_ms);

@@ -140,7 +140,50 @@ static void ble_rx_task(void *pvParameter) {
   LOG_INFO("BLE RX Task started");
 
   while (1) {
-    xQueueReceive(inst->rx_queue, &dummy, portMAX_DELAY);
+    // 타임아웃이 있는 큐 수신 (100ms마다 타임아웃 체크)
+    BaseType_t queue_result = xQueueReceive(inst->rx_queue, &dummy, pdMS_TO_TICKS(100));
+
+    // 비동기 요청 타임아웃 체크 (콜백 모드인 경우)
+    xSemaphoreTake(inst->mutex, portMAX_DELAY);
+    if (inst->async_request != NULL &&
+        inst->async_request->callback != NULL &&
+        inst->async_request->status == BLE_AT_STATUS_PENDING) {
+      TickType_t elapsed = xTaskGetTickCount() - inst->async_request->start_time;
+      if (elapsed >= inst->async_request->timeout_ticks) {
+        LOG_WARN("Async AT command timeout");
+
+        // 콜백 호출 준비
+        ble_at_complete_callback_t callback = inst->async_request->callback;
+        void *user_data = inst->async_request->user_data;
+
+        // 메모리 해제 및 포인터 초기화
+        ble_async_at_request_t *req_to_free = inst->async_request;
+        inst->async_request = NULL;
+
+        // Bypass 모드로 전환
+        LOG_INFO("Switching to bypass mode (timeout)");
+        if (inst->ble.ops && inst->ble.ops->bypass_mode) {
+          inst->ble.ops->bypass_mode();
+        }
+        inst->current_mode = BLE_MODE_BYPASS;
+
+        xSemaphoreGive(inst->mutex);
+
+        // 메모리 해제
+        vPortFree(req_to_free);
+
+        // 타임아웃 콜백 호출
+        callback(BLE_AT_STATUS_TIMEOUT, "", user_data);
+
+        continue;
+      }
+    }
+    xSemaphoreGive(inst->mutex);
+
+    // 큐에서 데이터를 받지 못했으면 다음 루프로
+    if (queue_result != pdTRUE) {
+      continue;
+    }
 
     xSemaphoreTake(inst->mutex, portMAX_DELAY);
 
@@ -337,6 +380,9 @@ ble_at_status_t ble_send_at_command_async(const char *at_cmd, const char *expect
   request.response_len = 0;
   request.status = BLE_AT_STATUS_PENDING;
   request.timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+  request.start_time = xTaskGetTickCount();
+  request.callback = NULL;  // 블로킹 모드 (세마포어 사용)
+  request.user_data = NULL;
   request.wait_sem = xSemaphoreCreateBinary();
 
   if (request.wait_sem == NULL) {
@@ -425,6 +471,85 @@ ble_at_status_t ble_send_at_command_async(const char *at_cmd, const char *expect
   return status;
 }
 
+// 비동기 AT 커맨드 전송 (논블로킹 - 콜백 방식)
+bool ble_send_at_command_nonblocking(const char *at_cmd, const char *expected_response,
+                                       uint32_t timeout_ms,
+                                       ble_at_complete_callback_t callback,
+                                       void *user_data) {
+  if (!ble_instance.enabled) {
+    LOG_ERR("BLE not enabled");
+    return false;
+  }
+
+  if (!at_cmd || !expected_response || !callback) {
+    LOG_ERR("Invalid parameters");
+    return false;
+  }
+
+  // 이미 진행 중인 비동기 요청이 있는지 확인
+  xSemaphoreTake(ble_instance.mutex, portMAX_DELAY);
+  if (ble_instance.async_request != NULL) {
+    xSemaphoreGive(ble_instance.mutex);
+    LOG_ERR("Another async AT command is pending");
+    return false;
+  }
+
+  // 비동기 요청 구조체 힙 할당 (콜백 방식이므로 스택 변수 사용 불가)
+  ble_async_at_request_t *request = pvPortMalloc(sizeof(ble_async_at_request_t));
+  if (request == NULL) {
+    xSemaphoreGive(ble_instance.mutex);
+    LOG_ERR("Failed to allocate memory for async request");
+    return false;
+  }
+
+  memset(request, 0, sizeof(ble_async_at_request_t));
+  strncpy(request->expected_response, expected_response, sizeof(request->expected_response) - 1);
+  request->response_len = 0;
+  request->status = BLE_AT_STATUS_PENDING;
+  request->timeout_ticks = pdMS_TO_TICKS(timeout_ms);
+  request->start_time = xTaskGetTickCount();
+  request->callback = callback;  // 콜백 설정
+  request->user_data = user_data;
+  request->wait_sem = NULL;  // 논블로킹 모드에서는 세마포어 사용 안 함
+
+  // 전역 async_request 포인터 설정
+  ble_instance.async_request = request;
+  xSemaphoreGive(ble_instance.mutex);
+
+  // AT 모드로 전환
+  LOG_INFO("Switching to AT command mode");
+  if (ble_instance.ble.ops && ble_instance.ble.ops->at_mode) {
+    ble_instance.ble.ops->at_mode();
+  }
+
+  xSemaphoreTake(ble_instance.mutex, portMAX_DELAY);
+  ble_instance.current_mode = BLE_MODE_AT;  // 모드 상태 업데이트
+  xSemaphoreGive(ble_instance.mutex);
+
+  // 모드 전환 대기 (BLE 모듈이 안정화될 시간)
+  vTaskDelay(pdMS_TO_TICKS(100));
+
+  // DMA 버퍼의 현재 위치를 업데이트하여 이전 데이터 무시
+  vTaskDelay(pdMS_TO_TICKS(10));  // RX task가 기존 데이터 처리하도록 여유 시간
+
+  // AT 커맨드 전송
+  LOG_INFO("Sending AT command (nonblocking): %s", at_cmd);
+  if (!ble_send(at_cmd, strlen(at_cmd), true)) {
+    xSemaphoreTake(ble_instance.mutex, portMAX_DELAY);
+    ble_instance.async_request = NULL;
+    xSemaphoreGive(ble_instance.mutex);
+    vPortFree(request);
+    LOG_ERR("Failed to send AT command");
+    return false;
+  }
+
+  // TX task가 실제로 UART로 전송할 시간 확보
+  vTaskDelay(pdMS_TO_TICKS(10));
+
+  LOG_INFO("AT command sent successfully (nonblocking), waiting for response via callback");
+  return true;
+}
+
 // BLE 디바이스 이름 설정 (AT+MANUF=<name>)
 bool ble_set_device_name_async(const char *device_name, uint32_t timeout_ms) {
   if (!device_name) {
@@ -455,6 +580,28 @@ bool ble_set_device_name_async(const char *device_name, uint32_t timeout_ms) {
 
   LOG_ERR("Device name setting failed with status: %d", status);
   return false;
+}
+
+// BLE 디바이스 이름 설정 (AT+MANUF=<name>) - 논블로킹 (콜백 방식)
+bool ble_set_device_name_nonblocking(const char *device_name, uint32_t timeout_ms,
+                                      ble_at_complete_callback_t callback,
+                                      void *user_data) {
+  if (!device_name) {
+    LOG_ERR("Device name is NULL");
+    return false;
+  }
+
+  if (!callback) {
+    LOG_ERR("Callback is NULL");
+    return false;
+  }
+
+  // AT+MANUF=<name>\r 커맨드 생성
+  char at_cmd[64];
+  snprintf(at_cmd, sizeof(at_cmd), "AT+MANUF=%s\r", device_name);
+
+  // 비동기 AT 커맨드 전송 (+OK 응답 기대)
+  return ble_send_at_command_nonblocking(at_cmd, "+OK", timeout_ms, callback, user_data);
 }
 
 bool ble_set_advon_async(uint32_t timeout_ms) {

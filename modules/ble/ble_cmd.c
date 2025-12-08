@@ -137,12 +137,39 @@ void ble_at_cmd_handler(ble_instance_t *inst)
                 inst->async_request->status = BLE_AT_STATUS_COMPLETED;
             }
 
-            // 세마포어 해제 (대기 중인 태스크 깨우기)
-            if (inst->async_request->wait_sem != NULL) {
+            LOG_INFO("Async AT response matched: %s", inst->parser.data);
+
+            // 콜백 또는 세마포어 처리
+            if (inst->async_request->callback != NULL) {
+                // 콜백 모드 (논블로킹)
+                ble_at_complete_callback_t callback = inst->async_request->callback;
+                void *user_data = inst->async_request->user_data;
+                ble_at_status_t status = inst->async_request->status;
+                char response_copy[BLE_AT_RESPONSE_MAX_SIZE];
+                strncpy(response_copy, inst->async_request->response_buf, sizeof(response_copy) - 1);
+                response_copy[sizeof(response_copy) - 1] = '\0';
+
+                // 메모리 해제 및 포인터 초기화 (콜백 호출 전에 완료)
+                ble_async_at_request_t *req_to_free = inst->async_request;
+                inst->async_request = NULL;
+
+                // Bypass 모드로 전환
+                LOG_INFO("Switching to bypass mode");
+                if (inst->ble.ops && inst->ble.ops->bypass_mode) {
+                    inst->ble.ops->bypass_mode();
+                }
+                inst->current_mode = BLE_MODE_BYPASS;
+
+                // 메모리 해제
+                vPortFree(req_to_free);
+
+                // 콜백 호출 (마지막에 호출하여 재진입 문제 방지)
+                callback(status, response_copy, user_data);
+            } else if (inst->async_request->wait_sem != NULL) {
+                // 세마포어 모드 (블로킹)
                 xSemaphoreGive(inst->async_request->wait_sem);
             }
 
-            LOG_INFO("Async AT response matched: %s", inst->parser.data);
             return;
         }
     }
