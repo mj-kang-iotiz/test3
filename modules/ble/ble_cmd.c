@@ -42,12 +42,12 @@ static void rs_handler(ble_instance_t *inst, const char *param);
 
 void bot_ok_handler(ble_instance_t *inst, const char *param)
 {
-    LOG_DEBUG("BLE AT OK received");
+    LOG_INFO("BLE: +OK received (unsolicited)");
 }
 
 void bot_err_handler(ble_instance_t *inst, const char *param)
 {
-    LOG_DEBUG("BLE AT ERROR received");
+    LOG_INFO("BLE: +ERROR received (unsolicited)");
 }
 
 void bot_rdy_handler(ble_instance_t *inst, const char *param)
@@ -131,8 +131,10 @@ void ble_at_cmd_handler(ble_instance_t *inst)
             // 상태 업데이트
             if (strncmp(inst->parser.data, "+OK", 3) == 0) {
                 inst->async_request->status = BLE_AT_STATUS_COMPLETED;
+                LOG_INFO("BLE: +OK received");
             } else if (strncmp(inst->parser.data, "+ERROR", 6) == 0) {
                 inst->async_request->status = BLE_AT_STATUS_ERROR;
+                LOG_INFO("BLE: +ERROR received");
             } else {
                 inst->async_request->status = BLE_AT_STATUS_COMPLETED;
             }
