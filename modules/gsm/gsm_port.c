@@ -196,6 +196,26 @@ int gsm_port_reset(void) {
 }
 
 /**
+ * @brief EC25 모듈 전원 종료
+ *
+ * PWR_KEY 핀을 이용한 정상 종료 수행
+ * EC25 데이터시트에 따르면 PWRKEY를 최소 650ms HIGH 유지 시 shutdown
+ * POWERED DOWN URC 수신 후 완전 종료 (약 18-30초 소요)
+ *
+ * @return int 0: 성공
+ */
+int gsm_port_poweroff(void) {
+  // PWR 핀 HIGH: shutdown 시작
+  HAL_GPIO_WritePin(GSM_PORT_GPIO_PORT, GSM_PORT_GPIO_PWR_PIN, GPIO_PIN_SET);
+  vTaskDelay(pdMS_TO_TICKS(700)); // 700ms 유지 (최소 650ms)
+
+  // PWR 핀 LOW: 정상 상태로 복귀
+  HAL_GPIO_WritePin(GSM_PORT_GPIO_PORT, GSM_PORT_GPIO_PWR_PIN, GPIO_PIN_RESET);
+
+  return 0;
+}
+
+/**
  * @brief This function handles USART1 global interrupt.
  */
 void USART1_IRQHandler(void) {

@@ -21,4 +21,14 @@ void gsm_start(void);
  */
 int gsm_port_reset(void);
 
+/**
+ * @brief EC25 모듈 전원 종료
+ *
+ * PWR_KEY 핀을 이용한 정상 종료 수행
+ * EC25 데이터시트에 따르면 PWRKEY를 최소 650ms LOW 유지 시 shutdown
+ *
+ * @return int 0: 성공
+ */
+int gsm_port_poweroff(void);
+
 #endif

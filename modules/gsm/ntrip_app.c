@@ -6,6 +6,7 @@
 #include "task.h"
 #include "tcp_socket.h"
 #include "flash_params.h"
+#include "gsm_port.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -559,14 +560,20 @@ void ntrip_stop(void)
     return;
   }
 
-  LOG_INFO("NTRIP 중지 시작");
+  LOG_INFO("NTRIP 중지 및 LTE 모듈 전원 종료 시작");
 
   // 중지 플래그 설정
   g_ntrip_should_stop = true;
   g_ntrip_connected = false;
 
-  // 태스크가 정상 종료될 시간을 줌
-  vTaskDelay(pdMS_TO_TICKS(100));
+  // 소켓 닫기 (태스크에서 처리되도록)
+  if (g_ntrip_socket)
+  {
+    tcp_close_force(g_ntrip_socket);
+  }
 
-  LOG_INFO("NTRIP 중지 완료");
+  // LTE 모듈 전원 종료 (PWR_KEY 핀 제어)
+  gsm_port_poweroff();
+
+  LOG_INFO("LTE 모듈 전원 종료 완료");
 }
