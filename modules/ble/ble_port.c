@@ -235,22 +235,7 @@ static int ble_configure_module(void) {
 
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  // 6. 디바이스 이름 설정
-  user_params_t *params = flash_params_get_current();
-  if (params != NULL && params->ble_device_name[0] != '\0') {
-    char name_cmd[64];
-    snprintf(name_cmd, sizeof(name_cmd), "AT+MANUF=%s\r", params->ble_device_name);
-    LOG_INFO("Setting BLE device name: %s", params->ble_device_name);
-    ret = ble_send_at_command_sync(name_cmd, "+OK", 2000);
-    if (ret == 0) {
-      LOG_INFO("BLE device name set successfully");
-    } else {
-      LOG_WARN("Failed to set BLE device name");
-    }
-    vTaskDelay(pdMS_TO_TICKS(100));
-  }
-
-  // 7. UART 비활성화 (comm_start에서 DMA 모드로 다시 활성화)
+  // 6. UART 비활성화 (comm_start에서 DMA 모드로 다시 활성화)
   LL_USART_Disable(UART5);
   ble_set_bypass_mode();
 
