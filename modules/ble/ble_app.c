@@ -20,6 +20,12 @@ void ble_cmd_parse_process(ble_instance_t *inst, const void *data, size_t len)
   {
     if(inst->parse_stae == BLE_CMD_PARSE_STATE_NONE)
     {
+      // 선행 \r 또는 \n 무시 (명령어 사이의 개행 문자)
+      if(*d == '\r' || *d == '\n')
+      {
+        continue;
+      }
+
       if(*d == '+')
       {
           inst->parser.pos = 0;
