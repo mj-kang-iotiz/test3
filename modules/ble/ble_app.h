@@ -40,6 +40,10 @@ typedef enum {
 // Bypass 모드 RX 데이터 콜백
 typedef void (*ble_bypass_rx_callback_t)(const uint8_t *data, size_t len);
 
+// 비동기 AT 명령어 완료 콜백
+// result: true = +OK, false = +ERROR
+typedef void (*ble_at_command_callback_t)(bool result, void *user_data);
+
 typedef struct {
   char expected_response[32];     // 기대하는 응답 문자열 (예: "+OK", "+ERROR")
   char response_buf[BLE_AT_RESPONSE_MAX_SIZE];  // 실제 받은 응답
@@ -48,6 +52,16 @@ typedef struct {
   ble_at_status_t status;
   TickType_t timeout_ticks;       // 타임아웃 (ticks)
 } ble_async_at_request_t;
+
+// 비동기 AT 명령어 요청 (콜백 기반)
+typedef struct {
+  char command[128];              // AT 명령어
+  ble_at_command_callback_t callback;  // 완료 콜백
+  void *user_data;                // 사용자 데이터
+  TickType_t start_tick;          // 시작 시각
+  TickType_t timeout_ticks;       // 타임아웃 (ticks)
+  bool is_active;                 // 활성 상태
+} ble_async_at_cmd_t;
 
 typedef struct {
   char data[512];
@@ -77,6 +91,9 @@ typedef struct {
 
   // 비동기 AT 커맨드 요청
   ble_async_at_request_t *async_request;
+
+  // 비동기 AT 명령어 (콜백 기반)
+  ble_async_at_cmd_t async_at_cmd;
 
   // 모드 및 연결 상태
   ble_mode_t current_mode;                 // 현재 모드 (AT/Bypass)
@@ -118,5 +135,41 @@ ble_mode_t ble_get_current_mode(void);
 
 // Bypass 모드 RX 콜백 등록 (Bypass 모드에서 수신된 데이터를 전달받음)
 void ble_set_bypass_rx_callback(ble_bypass_rx_callback_t callback);
+
+// 비동기 AT 명령어 전송 (콜백 기반, 즉시 반환)
+// AT+MANUF=디바이스명 또는 AT+DISCONNECT 같은 명령어 전송
+// +OK 또는 +ERROR 응답을 콜백으로 전달
+// 사용 예:
+//   void my_callback(bool result, void *user_data) {
+//     if (result) {
+//       LOG_INFO("AT command succeeded");
+//     } else {
+//       LOG_ERR("AT command failed");
+//     }
+//   }
+//   ble_send_at_cmd_truly_async("AT+MANUF=MyDevice\r", my_callback, NULL, 5000);
+bool ble_send_at_cmd_truly_async(const char *at_cmd, ble_at_command_callback_t callback,
+                                   void *user_data, uint32_t timeout_ms);
+
+// AT+MANUF=디바이스명 비동기 전송
+// 사용 예:
+//   void on_manuf_done(bool result, void *user_data) {
+//     if (result) {
+//       LOG_INFO("Device name set successfully");
+//     }
+//   }
+//   ble_set_manuf_async("MyDevice", on_manuf_done, NULL, 5000);
+bool ble_set_manuf_async(const char *device_name, ble_at_command_callback_t callback,
+                          void *user_data, uint32_t timeout_ms);
+
+// AT+DISCONNECT 비동기 전송
+// 사용 예:
+//   void on_disconnect_done(bool result, void *user_data) {
+//     if (result) {
+//       LOG_INFO("Disconnected successfully");
+//     }
+//   }
+//   ble_disconnect_async(on_disconnect_done, NULL, 5000);
+bool ble_disconnect_async(ble_at_command_callback_t callback, void *user_data, uint32_t timeout_ms);
 
 #endif

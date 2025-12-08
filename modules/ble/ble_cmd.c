@@ -111,7 +111,7 @@ void ble_app_cmd_handler(ble_instance_t *inst)
 
 void ble_at_cmd_handler(ble_instance_t *inst)
 {
-    // 비동기 AT 커맨드 요청이 있는지 확인
+    // 비동기 AT 커맨드 요청이 있는지 확인 (세마포어 기반)
     if (inst->async_request != NULL && inst->async_request->status == BLE_AT_STATUS_PENDING) {
         // 기대하는 응답과 매칭되는지 확인
         size_t expected_len = strlen(inst->async_request->expected_response);
@@ -143,6 +143,34 @@ void ble_at_cmd_handler(ble_instance_t *inst)
             }
 
             LOG_INFO("Async AT response matched: %s", inst->parser.data);
+            return;
+        }
+    }
+
+    // 비동기 AT 명령어 요청이 있는지 확인 (콜백 기반)
+    if (inst->async_at_cmd.is_active) {
+        // +OK 또는 +ERROR 응답 확인
+        bool is_ok = (strncmp(inst->parser.data, "+OK", 3) == 0);
+        bool is_error = (strncmp(inst->parser.data, "+ERROR", 6) == 0);
+
+        if (is_ok || is_error) {
+            LOG_INFO("Async AT command response: %s", inst->parser.data);
+
+            // 콜백 호출
+            if (inst->async_at_cmd.callback) {
+                inst->async_at_cmd.callback(is_ok, inst->async_at_cmd.user_data);
+            }
+
+            // Bypass 모드로 복귀
+            if (inst->ble.ops && inst->ble.ops->bypass_mode) {
+                inst->ble.ops->bypass_mode();
+            }
+            inst->current_mode = BLE_MODE_BYPASS;
+
+            // 비활성화
+            inst->async_at_cmd.is_active = false;
+
+            LOG_INFO("Switched back to bypass mode");
             return;
         }
     }
