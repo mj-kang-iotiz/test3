@@ -218,7 +218,22 @@ static int ble_configure_module(void) {
 
   LOG_INFO("BLE module configured at %lu bps", current_baudrate);
 
-  // 5. AT+ADVON 전송 (advertising 시작)
+  // 5. AT+MANUF? 전송 (디바이스명 읽기)
+  LOG_INFO("Reading BLE device name...");
+  ble_uart5_send("AT+MANUF?\r", strlen("AT+MANUF?\r"));
+
+  char device_name[128];
+  int name_len = ble_uart5_recv_line_poll(device_name, sizeof(device_name), 20);
+
+  if (name_len > 0) {
+    LOG_INFO("BLE Device Name: %s", device_name);
+  } else {
+    LOG_WARN("Failed to read BLE device name (timeout)");
+  }
+
+  vTaskDelay(pdMS_TO_TICKS(10));
+
+  // 6. AT+ADVON 전송 (advertising 시작)
   LOG_INFO("Starting BLE advertising...");
   ret = ble_send_at_command_sync("AT+ADVON\r", "+ADVERTISING", 3000);
   if (ret == 0) {
@@ -234,7 +249,7 @@ static int ble_configure_module(void) {
 
   vTaskDelay(pdMS_TO_TICKS(100));
 
-  // 6. UART 비활성화 (comm_start에서 DMA 모드로 다시 활성화)
+  // 7. UART 비활성화 (comm_start에서 DMA 모드로 다시 활성화)
   LL_USART_Disable(UART5);
   ble_set_bypass_mode();
 
