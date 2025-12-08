@@ -440,6 +440,15 @@ void gps_evt_handler(gps_t *gps, gps_event_t event, gps_procotol_t protocol,
     	        _add_gga_avg_data(inst, gps->nmea_data.gga.lat, gps->nmea_data.gga.lon,
     	                          gps->nmea_data.gga.alt);
     	    }
+
+    	    // Base Auto-Fix: GPS fix 상태 변화 감지
+    	    if (gps->nmea_data.gga.fix != inst->last_fix) {
+    	        base_auto_fix_on_gps_fix_changed(gps->nmea_data.gga.fix);
+    	        inst->last_fix = gps->nmea_data.gga.fix;
+    	    }
+
+    	    // Base Auto-Fix: GGA 데이터 업데이트
+    	    base_auto_fix_on_gga_update(&gps->nmea_data.gga);
     	}
 
       if (gps->nmea_data.gga_is_rdy)
@@ -690,16 +699,6 @@ static void gps_process_task(void *pvParameter) {
 
     xQueueReceive(inst->queue, &dummy,
                   portMAX_DELAY);
-
-    // GPS Fix 상태 변화 감지 (Base Auto-Fix 모듈 알림)
-    gps_fix_t current_fix = inst->gps.nmea_data.gga.fix;
-    if (current_fix != inst->last_fix) {
-      base_auto_fix_on_gps_fix_changed(current_fix);
-      inst->last_fix = current_fix;
-    }
-
-    // GGA 데이터 업데이트 (Base Auto-Fix 모듈 알림)
-    base_auto_fix_on_gga_update(&inst->gps.nmea_data.gga);
 
     // base : quality 0,1,2 -> red, 4,5 -> yellow, 7 -> green, etc -> none
     // rover : quality 0,1,2 -> red, 5 -> yellow, 4 -> green, etc -> none
