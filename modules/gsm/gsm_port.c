@@ -196,6 +196,26 @@ int gsm_port_reset(void) {
 }
 
 /**
+ * @brief EC25 모듈 Power Off (PWRKEY 핀 사용)
+ *
+ * PWRKEY 핀을 이용한 정상 종료 수행
+ * EC25 데이터시트에 따르면 PWRKEY를 650ms 이상 HIGH 유지 시 power off
+ * 정상 종료 시 "POWERED DOWN" URC 전송됨
+ */
+void gsm_port_power_off(void) {
+  // PWRKEY 핀 HIGH: power off 시작
+  HAL_GPIO_WritePin(GSM_PORT_GPIO_PORT, GSM_PORT_GPIO_PWR_PIN, GPIO_PIN_SET);
+  vTaskDelay(pdMS_TO_TICKS(700)); // 700ms 유지 (최소 650ms)
+
+  // PWRKEY 핀 LOW: 정상 상태로 복귀
+  HAL_GPIO_WritePin(GSM_PORT_GPIO_PORT, GSM_PORT_GPIO_PWR_PIN, GPIO_PIN_RESET);
+
+  // Power down 완료 대기 (1초)
+  // 참고: "POWERED DOWN" URC는 자동 수신됨
+  vTaskDelay(pdMS_TO_TICKS(1000));
+}
+
+/**
  * @brief This function handles USART1 global interrupt.
  */
 void USART1_IRQHandler(void) {

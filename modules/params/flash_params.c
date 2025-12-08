@@ -12,7 +12,7 @@
 #define FLASH_USER_START_ADDR    0x080E0000U
 
 
-static const user_params_t user_default_params = 
+static const user_params_t user_default_params =
 {
     .magic = FLASH_MAGIC_NUMBER,
     .ntrip_url = "ntrip.hi-rtk.io",
@@ -26,6 +26,7 @@ static const user_params_t user_default_params =
     .alt = "",
     .baseline_len = 0.0,
     .ble_device_name = "Gugu_Base",
+    .base_auto_fix_enabled = 0,  // 기본값: 비활성화
 };
 
 static user_params_t current_params;
@@ -225,4 +226,9 @@ void flash_params_set_ble_device_name(const char* name)
 {
     strncpy(current_params.ble_device_name, name, sizeof(current_params.ble_device_name) - 1);
     current_params.ble_device_name[sizeof(current_params.ble_device_name) - 1] = '\0';
+}
+
+void flash_params_set_base_auto_fix_enabled(uint32_t enabled)
+{
+    current_params.base_auto_fix_enabled = enabled;
 }

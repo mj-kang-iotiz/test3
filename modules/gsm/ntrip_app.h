@@ -14,4 +14,9 @@ void ntrip_task_create(gsm_t *gsm);
 int ntrip_send_gga_data(const char *data, uint8_t len);
 bool ntrip_gga_send_queue_initialized(void);
 
+/**
+ * @brief NTRIP 태스크 중지 및 리소스 정리
+ */
+void ntrip_stop(void);
+
 #endif // NTRIP_TASK_H

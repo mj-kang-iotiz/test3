@@ -21,4 +21,12 @@ void gsm_start(void);
  */
 int gsm_port_reset(void);
 
+/**
+ * @brief EC25 모듈 Power Off (PWRKEY 핀 사용)
+ *
+ * PWRKEY 핀을 이용한 정상 종료 수행
+ * (PWRKEY HIGH > 650ms > LOW)
+ */
+void gsm_port_power_off(void);
+
 #endif

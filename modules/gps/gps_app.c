@@ -11,6 +11,7 @@
 #include <math.h>
 #include "ubx_init.h"
 #include "flash_params.h"
+#include "base_auto_fix.h"
 
 #ifndef TAG
   #define TAG "GPS_APP"
@@ -76,6 +77,9 @@ typedef struct {
    QueueHandle_t cmd_queue;
   TaskHandle_t tx_task;
   gps_cmd_request_t *current_cmd_req;
+
+  // Base Auto-Fix 용
+  gps_fix_t last_fix;  // 이전 fix 상태
 } gps_instance_t;
 
 static gps_instance_t gps_instances[GPS_ID_MAX] = {0};
@@ -687,6 +691,16 @@ static void gps_process_task(void *pvParameter) {
     xQueueReceive(inst->queue, &dummy,
                   portMAX_DELAY);
 
+    // GPS Fix 상태 변화 감지 (Base Auto-Fix 모듈 알림)
+    gps_fix_t current_fix = inst->gps.nmea_data.gga.fix;
+    if (current_fix != inst->last_fix) {
+      base_auto_fix_on_gps_fix_changed(current_fix);
+      inst->last_fix = current_fix;
+    }
+
+    // GGA 데이터 업데이트 (Base Auto-Fix 모듈 알림)
+    base_auto_fix_on_gga_update(&inst->gps.nmea_data.gga);
+
     // base : quality 0,1,2 -> red, 4,5 -> yellow, 7 -> green, etc -> none
     // rover : quality 0,1,2 -> red, 5 -> yellow, 4 -> green, etc -> none
     if (inst->gps.nmea_data.gga.fix <= GPS_FIX_DGPS) {
@@ -843,6 +857,28 @@ void gps_init_all(void) {
   }
 
   LOG_INFO("GPS 전체 인스턴스 초기화 완료");
+
+  // Base Auto-Fix 모듈 초기화 (Base 타입인 경우에만)
+  if (config->board == BOARD_TYPE_BASE_F9P || config->board == BOARD_TYPE_BASE_UM982) {
+    user_params_t *params = flash_params_get_current();
+    if (params->base_auto_fix_enabled) {
+      LOG_INFO("Base Auto-Fix 모드 활성화");
+
+      // 첫 번째 GPS 인스턴스로 초기화
+      if (base_auto_fix_init(GPS_ID_BASE)) {
+        // 초기화 성공 시 시작
+        if (base_auto_fix_start()) {
+          LOG_INFO("Base Auto-Fix 시작 성공");
+        } else {
+          LOG_ERR("Base Auto-Fix 시작 실패");
+        }
+      } else {
+        LOG_ERR("Base Auto-Fix 초기화 실패");
+      }
+    } else {
+      LOG_INFO("Base Auto-Fix 모드 비활성화 (파라미터 설정)");
+    }
+  }
 }
 
 /**

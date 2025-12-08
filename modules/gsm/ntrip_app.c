@@ -6,6 +6,7 @@
 #include "task.h"
 #include "tcp_socket.h"
 #include "flash_params.h"
+#include "base_auto_fix.h"
 #include <stdlib.h>
 #include <string.h>
 
@@ -145,6 +146,9 @@ static QueueHandle_t g_gga_send_queue = NULL;
 
 // GGA 송신 태스크 핸들
 static TaskHandle_t g_gga_send_task_handle = NULL;
+
+// NTRIP 수신 태스크 핸들
+static TaskHandle_t g_ntrip_recv_task_handle = NULL;
 
 static int ntrip_connect_to_server(tcp_socket_t *sock)
 {
@@ -322,6 +326,7 @@ static void ntrip_tcp_recv_task(void *pvParameter)
   }
 
   g_ntrip_connected = true;
+  base_auto_fix_on_ntrip_connected(true);
   // gsm_socket_monitor_start();
 
   // GGA 송신 태스크 생성
@@ -421,6 +426,7 @@ static void ntrip_tcp_recv_task(void *pvParameter)
           }
 
           g_ntrip_connected = true;
+          base_auto_fix_on_ntrip_connected(true);
         }
       }
     }
@@ -472,6 +478,7 @@ static void ntrip_tcp_recv_task(void *pvParameter)
         }
 
         g_ntrip_connected = true;
+        base_auto_fix_on_ntrip_connected(true);
       }
     }
   }
@@ -495,7 +502,53 @@ static void ntrip_tcp_recv_task(void *pvParameter)
 void ntrip_task_create(gsm_t *gsm)
 {
   xTaskCreate(ntrip_tcp_recv_task, "ntrip_recv", 1536, gsm,
-              tskIDLE_PRIORITY + 3, NULL);
+              tskIDLE_PRIORITY + 3, &g_ntrip_recv_task_handle);
+}
+
+/**
+ * @brief NTRIP 중지 및 리소스 정리
+ */
+void ntrip_stop(void)
+{
+  LOG_INFO("NTRIP 중지 시작...");
+
+  // 연결 상태 플래그 리셋
+  g_ntrip_connected = false;
+
+  // GGA 송신 태스크 삭제
+  if (g_gga_send_task_handle != NULL)
+  {
+    vTaskDelete(g_gga_send_task_handle);
+    g_gga_send_task_handle = NULL;
+    LOG_INFO("GGA 송신 태스크 삭제");
+  }
+
+  // TCP 소켓 닫기
+  if (g_ntrip_socket != NULL)
+  {
+    tcp_close_force(g_ntrip_socket);
+    tcp_socket_destroy(g_ntrip_socket);
+    g_ntrip_socket = NULL;
+    LOG_INFO("NTRIP 소켓 닫기");
+  }
+
+  // 수신 태스크 삭제
+  if (g_ntrip_recv_task_handle != NULL)
+  {
+    vTaskDelete(g_ntrip_recv_task_handle);
+    g_ntrip_recv_task_handle = NULL;
+    LOG_INFO("NTRIP 수신 태스크 삭제");
+  }
+
+  // GGA 큐 정리 (큐 삭제는 하지 않음, 재시작 시 재사용)
+  if (g_gga_send_queue != NULL)
+  {
+    xQueueReset(g_gga_send_queue);
+    LOG_INFO("GGA 큐 리셋");
+  }
+
+  led_set_color(LED_ID_1, LED_COLOR_OFF);
+  LOG_INFO("NTRIP 중지 완료");
 }
 
 int ntrip_send_gga_data(const char *data, uint8_t len)

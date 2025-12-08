@@ -14,7 +14,7 @@ typedef struct
     char ntrip_id[32];
     char ntrip_pw[32];
     char ntrip_mountpoint[32];
-    
+
     uint32_t use_manual_position;
     char lat[16];
     char lon[16];
@@ -23,6 +23,9 @@ typedef struct
     double baseline_len;
 
     char ble_device_name[32];
+
+    // Base Auto-Fix 모드 설정
+    uint32_t base_auto_fix_enabled;  // 0: 비활성화, 1: 활성화
 }user_params_t;
 
 HAL_StatusTypeDef flash_params_erase(void);
@@ -42,5 +45,6 @@ void flash_params_set_ntrip_mountpoint(const char* mountpoint);
 void flash_params_set_manual_position(uint32_t use_manual, const char* lat, const char* lon, const char* alt);
 void flash_params_set_baseline_len(double len);
 void flash_params_set_ble_device_name(const char* name);
+void flash_params_set_base_auto_fix_enabled(uint32_t enabled);
 
 #endif
