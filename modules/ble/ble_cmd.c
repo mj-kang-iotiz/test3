@@ -97,16 +97,21 @@ static const ble_at_cmd_entry_t at_cmd_table[] = {
 
 void ble_app_cmd_handler(ble_instance_t *inst)
 {
+    LOG_INFO("ble_app_cmd_handler: parsing [%s]", inst->parser.data);
+
     for (int i = 0; at_cmd_table[i].name != NULL; i++)
     {
         size_t name_len = strlen(at_cmd_table[i].name);
 
         if (strncmp(inst->parser.data, at_cmd_table[i].name, name_len) == 0)
         {
+            LOG_INFO("Command matched: %s -> calling handler", at_cmd_table[i].name);
             at_cmd_table[i].handler(inst, inst->parser.data + name_len);
             return;
         }
     }
+
+    LOG_WARN("No command matched for: [%s]", inst->parser.data);
 }
 
 void ble_at_cmd_handler(ble_instance_t *inst)
@@ -181,10 +186,13 @@ static void sg_handler(ble_instance_t *inst, const char *param)
 }
 static void gd_handler(ble_instance_t *inst, const char *param)
 {
+    LOG_INFO("gd_handler called! param=[%s]", param ? param : "NULL");
+
     user_params_t *params = flash_params_get_current();
     char device_name[32];
 
     sprintf(device_name, "Get %s\n\r", params->ble_device_name);
+    LOG_INFO("Sending response: %s", device_name);
     BLE_AT_RESP_SEND(device_name);
 }
 static void gi_handler(ble_instance_t *inst, const char *param)

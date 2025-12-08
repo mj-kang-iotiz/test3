@@ -81,14 +81,17 @@ void ble_cmd_parse_process(ble_instance_t *inst, const void *data, size_t len)
         if(*d == '\r' || *d == '\n')
         {
           inst->parser.data[inst->parser.pos - 1] = '\0'; // \r 제거
-          LOG_INFO("BLE AT Command received: %s", inst->parser.data);
+          LOG_INFO("BLE AT Command received: [%s] (len=%d, state=%d)",
+                   inst->parser.data, strlen(inst->parser.data), inst->parse_stae);
 
           if(inst->parse_stae == BLE_CMD_PARSE_STATE_DATA)
           {
+            LOG_INFO("Calling ble_at_cmd_handler");
             ble_at_cmd_handler(inst);
           }
           else
           {
+            LOG_INFO("Calling ble_app_cmd_handler");
             ble_app_cmd_handler(inst);
           }
 
